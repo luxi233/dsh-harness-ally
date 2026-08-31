@@ -1,7 +1,7 @@
 {
   "name": "dsh-ally",
-  "version": "0.12.1",
-  "description": "Cache-aware Harness Alliance Mode for DeepSeek Harness with DSH-routed Claude Code, Codex, and Kimi Code execution.",
+  "version": "0.12.1-fork.1",
+  "description": "Fork of BaronCyrus/dsh-harness-ally. Cache-aware Harness Alliance Mode for DeepSeek Harness with DSH-routed Claude Code, Codex, and Kimi Code execution. Adds Windows + dsh-bridge customTunnel compatibility (relaxed loopback trust, .cmd spawn wrapping, async install to bypass 504 timeouts).",
   "type": "module",
   "scripts": {
     "test": "node --test test/*.test.cjs test/*.test.mjs"
@@ -30,6 +30,14 @@
     "cordis.patch.yml"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/luxi233/dsh-harness-ally.git"
+  },
+  "homepage": "https://github.com/luxi233/dsh-harness-ally#readme",
+  "bugs": {
+    "url": "https://github.com/luxi233/dsh-harness-ally/issues"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
