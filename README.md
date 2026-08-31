@@ -1,5 +1,10 @@
 # Harness联盟模式（DSH Agent Preset）
 
+> **⚠️ 这是一个个人 fork** —— 基于 [`BaronCyrus/dsh-harness-ally`](https://github.com/BaronCyrus/dsh-harness-ally)@`0.12.1`。
+> 当前 fork 版本 `0.12.1-fork.1`,加了 **Windows + dsh-bridge customTunnel 远程访问 + Kimi Code 0.39.x 兼容**的补丁。
+> 完整改动说明见 [`FORK-NOTES.md`](./FORK-NOTES.md)。
+> 上游有更新时,本 fork 会 rebase 同步(`git fetch upstream && git rebase upstream/main`)。
+
 <img width="1450" height="540" alt="image" src="https://github.com/user-attachments/assets/9735076f-7507-4653-b5f0-fe7c329c3270" />
 
 让 DeepSeek Harness、Claude Code、Codex 和 Kimi Code 共享同一个 DSH 会话生命周期，并与 DSH 原生模型选择器自由组合。
@@ -29,17 +34,69 @@
 - Claude Code / Codex / Kimi Code CLI 均为可选：可以预先全局安装，也可以在「选择Harness」菜单中按需安装
 - macOS、Linux、Windows
 
+## 与上游的差异(本 fork 加了什么)
+
+> 详细 commit history 见 [`FORK-NOTES.md`](./FORK-NOTES.md);简表如下:
+
+| # | 文件 | 修改 | 解决什么 |
+|---|---|---|---|
+| 1 | `lib/index.js` | `trustedRead` 接受 loopback Host;`trustedMutation` 取消 `sec-fetch-site === 'same-origin'` 强校验;新增 `ALLOWED_REMOTE_HOSTS` 白名单 | 远程浏览器通过 dsh-bridge customTunnel 访问时 `Host: 127.0.0.1` 与浏览器 Origin 不匹配导致"拒绝非同源请求" |
+| 2 | `lib/cli-manager.js` | `performInstall` 把 `npm.cmd` 替换为 `node + npm-cli.js`;`install()` 同步标记 installs Map;`/ally/cli-install` 路由改为 fire-and-forget | DSH subprocess 直接 `child_process.spawn` 不带 shell:true,`.cmd` 触发 `spawn EINVAL`;`npm install` 跑超 30s 公网隧道返回 504 |
+| 3 | `lib/codex-app-server.js` | `appServerArgv` 把 `codex.cmd` 拆成 `[node, codex.js]`;去掉 `policy.mode !== 'danger-full-access'` 的 confinement 强校验 | Codex 切换时报 `codex requires a fully enforcing DSH sandbox` + spawn EINVAL |
+| 4 | `lib/harness.js` | Claude 切换的 spawn 路径同样把 `.cmd` 拆成真实 `.exe`(native) 或 `node + .js`;去掉 confinement 强校验 | Claude 切换时 spawn EINVAL |
+| 5 | `lib/kimi-acp.js` | kimi 0.39.x 的入口从 `bin/kimi.js` 改为 `dist/main.mjs`,通过读 `package.json` 的 `bin` 字段自适应;`KIMI_CODE_HOME` 强制用持久目录(`deps.stateDir/native/kimi`) | Kimi Code 切换报 `Kimi Code ACP 提前退出(exit 1)` —— 0.39.x 重写了入口路径 |
+| 6 | `lib/index.js` (重复条目 #1) | 新增 debugLog 写到 `%TEMP%\dsh-ally-debug.log` | 出错时能看出 ally 实际传给子进程的 argv/env/cwd/exit code |
+
+### 安全说明
+
+`trustedRead` 接受 loopback Host 是最敏感的改动。推理:
+
+1. `Host: 127.0.0.1:3080` 只能由本机的 dsh-bridge tunnel-client 在改写 Host 头后发出,外部浏览器伪造不了
+2. dsh-bridge 自身有密码 / token 认证(`~/.dsh/dsh-bridge/config.json` 里 `mode: token_and_password`)
+3. 即使绕过了同源 host 匹配,Origin 头仍必须存在(且要么匹配 loopback authority,要么命中白名单)
+
+**如果您的 dsh web 不是经 dsh-bridge 的认证隧道暴露**(比如直接公网端口转发),把公网 host:port 加到 `lib/index.js` 的 `ALLOWED_REMOTE_HOSTS` Set 里。
+
+### Windows 特有的两条踩坑
+
+| 坑 | 解决 |
+|---|---|
+| `DSH subprocess` 直接调 `child_process.spawn`,**不带 `shell:true`**,`.cmd` 文件触发 `EINVAL` | 把 `.cmd` 拆成 `[process.execPath, <entry>]` |
+| managed install 时 `executable` 在 `node_modules/.bin/`,而包本体在上一级 `node_modules/<pkg>/`,basedir 必须跳两层 | 用 `dirname(dirname(executable))` 修正;join 时用 `nodes = basedir 是否已经以 'node_modules' 结尾` 决定要不要再加 `node_modules` |
+
+### 远端 Kimi OAuth 一次性 setup
+
+本 fork 把 `KIMI_CODE_HOME` 强制指向 `~/.dsh/state/native/kimi/`,确保 OAuth 凭据持久。**首次切 KimiCode 前**手动跑一次 login:
+
+```powershell
+$kimiMain = "$env:USERPROFILE\.dsh\tools\dsh-ally\kimi-code\node_modules\@moonshot-ai\kimi-code\dist\main.mjs"
+$kimiHome  = "$env:USERPROFILE\.dsh\state\native\kimi"
+New-Item -ItemType Directory -Force -Path $kimiHome | Out-Null
+$env:KIMI_CODE_HOME = $kimiHome
+& node $kimiMain login
+```
+
+会打开浏览器给一个 `user_code`,授权后凭据写到 `$kimiHome/credentials`,之后 ally 启动 kimi 自动用已存凭据。
+
+### 调试
+
+- `%TEMP%\dsh-ally-debug.log`(每次 spawn 写一行 kimiSpawn / kimiSpawned / kimiResolvedEntry / kimiExit)
+- `git log origin/main..HEAD` 看未推送的本地 commit
+- `git fetch upstream && git rebase upstream/main` 同步上游
+
 ## 安装
 
 ```bash
-# 1. 克隆到固定 preset id（Host 的隔离规则依赖 harness-ally）
-git clone https://github.com/BaronCyrus/dsh-harness-ally.git ~/.dsh/.agent-presets/harness-ally
+# 1. 克隆本 fork 到固定 preset id（Host 的隔离规则依赖 harness-ally）
+git clone https://github.com/luxi233/dsh-harness-ally.git ~/.dsh/.agent-presets/harness-ally
 # Windows PowerShell:
-# git clone https://github.com/BaronCyrus/dsh-harness-ally.git "$env:USERPROFILE\.dsh\.agent-presets\harness-ally"
+# git clone https://github.com/luxi233/dsh-harness-ally.git "$env:USERPROFILE\.dsh\.agent-presets\harness-ally"
 
 # 2. 把同一仓库以 link 方式注册到 Web Profile
 node ~/.dsh/.agent-presets/harness-ally/setup/install.mjs
 ```
+
+> 想用原版(无 Windows/远程兼容补丁)?把 URL 换成 `https://github.com/BaronCyrus/dsh-harness-ally.git` 即可。
 
 如果设置了 `DSH_HOME`，将上面的 `~/.dsh` 替换为对应目录。
 
