@@ -1,6 +1,6 @@
 {
   "name": "dsh-ally",
-  "version": "0.12.1-fork.1",
+  "version": "0.12.1-fork.2",
   "description": "Fork of BaronCyrus/dsh-harness-ally. Cache-aware Harness Alliance Mode for DeepSeek Harness with DSH-routed Claude Code, Codex, and Kimi Code execution. Adds Windows + dsh-bridge customTunnel compatibility (relaxed loopback trust, .cmd spawn wrapping, async install to bypass 504 timeouts).",
   "type": "module",
   "scripts": {

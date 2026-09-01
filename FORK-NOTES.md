@@ -17,6 +17,7 @@ customTunnel, **none of those assumptions hold**:
 | Spawn `npm.cmd` from `cli-manager.performInstall` | `spawn EINVAL` | Replaces with `node + npm-cli.js` |
 | `npm install` from `/ally/cli-install` route, reached via dsh-bridge tunnel | HTTP 504 after ~30-60s — public tunnel proxy times out before `npm install` completes | Fire-and-forget install: route returns immediately with `installing:true`; user sees progress via subsequent status polls |
 | `policyFor(session)` returns non-`danger-full-access` under alliance mode (session-level policy, not preset-level) | `codex/claude-code/kimi-code requires a fully enforcing DSH sandbox` (403) | Skips ally-internal `sandbox.confine` check; DSH outer sandbox from `ctx.sandboxPolicy` is still enforced at a higher level |
+| Change dsh-bridge's public IP / port, or hand the fork to other users behind their own dsh-bridge | Edit `ALLOWED_REMOTE_HOSTS` to add every new `host:port` | Set `ALLOWED_REMOTE_ALL = true` so `isWhitelistedOrigin` short-circuits; trust moves one layer up to dsh-bridge's `token_and_password` auth |
 
 All five fixes are scoped to `lib/` and do not change any DSH core, dsh-bridge, or upstream
 plugin code. They can be rebased against future upstream releases with minimal conflict.
@@ -53,7 +54,8 @@ nothing for you — it only activates when `req.headers.host` is `127.0.0.1` / `
 | `lib/codex-app-server.js` | Skip `sandbox.confine` enforcement check; `appServerArgv` resolves `.cmd` to `node + codex.js` on Windows |
 | `lib/harness.js` | Same two patches as `codex-app-server.js`, applied to the generic Claude/Kimi spawn path; uses a hardcoded `RESOLVED_NATIVE` map (`claude.cmd` → `claude.exe`, `codex.cmd` → `codex.js`, `kimi.cmd` → `kimi.js`) |
 | `lib/kimi-acp.js` | Same two patches as `codex-app-server.js`, applied to Kimi's dedicated `startKimiAcpRun` |
-| `package.json` | Bumped to `0.12.1-fork.1`; description documents the fork purpose |
+| `package.json` | Bumped to `0.12.1-fork.2`; description documents the fork purpose |
+| `lib/index.js` (additional patch in fork.2) | New `ALLOWED_REMOTE_ALL = true` toggle; `isWhitelistedOrigin` returns `true` when set, bypassing per-host match |
 
 ## Install
 
