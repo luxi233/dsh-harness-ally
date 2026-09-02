@@ -1,7 +1,7 @@
 # Harness联盟模式（DSH Agent Preset）
 
 > **⚠️ 这是一个个人 fork** —— 基于 [`BaronCyrus/dsh-harness-ally`](https://github.com/BaronCyrus/dsh-harness-ally)@`0.12.1`。
-> 当前 fork 版本 `0.12.1-fork.2`,加了 **Windows + dsh-bridge customTunnel 远程访问 + Kimi Code 0.39.x 兼容**的补丁。
+> 当前 fork 版本 `0.12.1-fork.3`,加了 **Windows + dsh-bridge customTunnel 远程访问 + Kimi Code 0.39.x 兼容**的补丁。
 > 完整改动说明见 [`FORK-NOTES.md`](./FORK-NOTES.md)。
 > 上游有更新时,本 fork 会 rebase 同步(`git fetch upstream && git rebase upstream/main`)。
 
@@ -45,8 +45,7 @@
 | 3 | `lib/codex-app-server.js` | `appServerArgv` 把 `codex.cmd` 拆成 `[node, codex.js]`;去掉 `policy.mode !== 'danger-full-access'` 的 confinement 强校验 | Codex 切换时报 `codex requires a fully enforcing DSH sandbox` + spawn EINVAL |
 | 4 | `lib/harness.js` | Claude 切换的 spawn 路径同样把 `.cmd` 拆成真实 `.exe`(native) 或 `node + .js`;去掉 confinement 强校验 | Claude 切换时 spawn EINVAL |
 | 5 | `lib/kimi-acp.js` | kimi 0.39.x 的入口从 `bin/kimi.js` 改为 `dist/main.mjs`,通过读 `package.json` 的 `bin` 字段自适应;`KIMI_CODE_HOME` 强制用持久目录(`deps.stateDir/native/kimi`) | Kimi Code 切换报 `Kimi Code ACP 提前退出(exit 1)` —— 0.39.x 重写了入口路径 |
-| 6 | `lib/index.js` (重复条目 #1) | 新增 debugLog 写到 `%TEMP%\dsh-ally-debug.log` | 出错时能看出 ally 实际传给子进程的 argv/env/cwd/exit code |
-| 7 | `lib/index.js` | 新增 `ALLOWED_REMOTE_ALL = true` 常量;`isWhitelistedOrigin` 命中后直接返回 `true`(原本按 host 精确匹配) | fork 用户只走 dsh-bridge 访问,换 IP 服务器或对外二次分发时不再需要改白名单 |
+| 6 | `lib/index.js` | 新增 `ALLOWED_REMOTE_ALL = true` 常量;`isWhitelistedOrigin` 命中后直接返回 `true`(原本按 host 精确匹配) | fork 用户只走 dsh-bridge 访问,换 IP 服务器或对外二次分发时不再需要改白名单 |
 
 ### 安全说明
 
@@ -81,7 +80,6 @@ $env:KIMI_CODE_HOME = $kimiHome
 
 ### 调试
 
-- `%TEMP%\dsh-ally-debug.log`(每次 spawn 写一行 kimiSpawn / kimiSpawned / kimiResolvedEntry / kimiExit)
 - `git log origin/main..HEAD` 看未推送的本地 commit
 - `git fetch upstream && git rebase upstream/main` 同步上游
 

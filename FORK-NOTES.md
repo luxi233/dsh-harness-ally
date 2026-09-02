@@ -49,13 +49,14 @@ nothing for you — it only activates when `req.headers.host` is `127.0.0.1` / `
 
 | File | Change |
 |---|---|
-| `lib/index.js` | `trustedRead` accepts loopback authority unconditionally; `trustedMutation` no longer requires `sec-fetch-site === 'same-origin'`; debug log to `%TEMP%\dsh-ally-debug.log`; opt-in `ALLOWED_REMOTE_HOSTS` whitelist for direct public-host access |
+| `lib/index.js` | `trustedRead` accepts loopback authority unconditionally; `trustedMutation` no longer requires `sec-fetch-site === 'same-origin'`; opt-in `ALLOWED_REMOTE_HOSTS` whitelist for direct public-host access |
 | `lib/cli-manager.js` | `performInstall` swaps `npm.cmd` → `node + npm-cli.js` on Windows; `install()` synchronously marks `installs` Map so concurrent `status()` reflects `installing:true` |
 | `lib/codex-app-server.js` | Skip `sandbox.confine` enforcement check; `appServerArgv` resolves `.cmd` to `node + codex.js` on Windows |
 | `lib/harness.js` | Same two patches as `codex-app-server.js`, applied to the generic Claude/Kimi spawn path; uses a hardcoded `RESOLVED_NATIVE` map (`claude.cmd` → `claude.exe`, `codex.cmd` → `codex.js`, `kimi.cmd` → `kimi.js`) |
 | `lib/kimi-acp.js` | Same two patches as `codex-app-server.js`, applied to Kimi's dedicated `startKimiAcpRun` |
-| `package.json` | Bumped to `0.12.1-fork.2`; description documents the fork purpose |
+| `package.json` | Bumped to `0.12.1-fork.3`; description documents the fork purpose |
 | `lib/index.js` (additional patch in fork.2) | New `ALLOWED_REMOTE_ALL = true` toggle; `isWhitelistedOrigin` returns `true` when set, bypassing per-host match |
+| `lib/index.js`, `lib/kimi-acp.js` (fork.3) | Removed the fork-only unbounded `%TEMP%\dsh-ally-debug.log` diagnostic logging |
 
 ## Install
 
