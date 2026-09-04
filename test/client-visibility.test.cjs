@@ -73,12 +73,12 @@ function loadClient(agentPreset, { selectorOpen = false, projectionValues = fals
   }
 }
 
-function selectorProps(fixture, running = false, blank = false) {
+function selectorProps(fixture, running = false) {
   return {
     sessionId: fixture.sessionId,
     t: (key) => key,
     useSessions: (select) => select(fixture.listState),
-    useSession: (select) => select({ running, blank }),
+    useSession: (select) => select({ running }),
   }
 }
 
@@ -100,10 +100,10 @@ test('new-session screen never inherits Harness visibility from a stale prior al
   assert.equal(fixture.inputRight.component(selectorProps(fixture)), null)
 })
 
-test('blank alliance sessions leave the welcome-page selector as the only Harness control', () => {
+test('blank alliance sessions retain the session Harness selector', () => {
   const fixture = loadClient('harness-ally', { projectionValues: true })
 
-  assert.equal(fixture.inputRight.component(selectorProps(fixture, false, true)), null)
+  assert.equal(fixture.inputRight.component(selectorProps(fixture)).props.className, 'ally-engine')
 })
 
 test('Harness selector is a compact engine chip inside alliance sessions', () => {
@@ -178,6 +178,8 @@ test('plugin never replaces the native composer or its configured-model selector
 
   assert.equal(fixture.registrations.some((entry) => entry.config.name === 'conversation.composer'), false)
   assert.equal(fixture.registrations.some((entry) => entry.config.name === 'conversation.view'), false)
+  assert.equal(clientSource.includes('ally.welcome-harness'), false)
+  assert.equal(clientSource.includes('ally-welcome-mount'), false)
 })
 
 test('badges use an additive assistant action without claiming the exclusive turn-tail chain', () => {

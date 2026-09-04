@@ -1,7 +1,7 @@
 # Harness联盟模式（DSH Agent Preset）
 
 > **⚠️ 这是一个个人 fork** —— 基于 [`BaronCyrus/dsh-harness-ally`](https://github.com/BaronCyrus/dsh-harness-ally)@`0.12.1`。
-> 当前 fork 版本 `0.12.1-fork.4`,加了 **Windows + dsh-bridge customTunnel 远程访问 + Kimi Code 0.39.x + DSH 0.1.2 兼容**的补丁。
+> 当前 fork 版本 `0.12.1-fork.5`,加了 **Windows + dsh-bridge customTunnel 远程访问 + Kimi Code 0.39.x + DSH 0.1.2 兼容**的补丁。
 > 完整改动说明见 [`FORK-NOTES.md`](./FORK-NOTES.md)。
 > 上游有更新时,本 fork 会 rebase 同步(`git fetch upstream && git rebase upstream/main`)。
 
@@ -46,7 +46,7 @@
 | 4 | `lib/harness.js` | Claude 切换的 spawn 路径同样把 `.cmd` 拆成真实 `.exe`(native) 或 `node + .js`;去掉 confinement 强校验 | Claude 切换时 spawn EINVAL |
 | 5 | `lib/kimi-acp.js` | kimi 0.39.x 的入口从 `bin/kimi.js` 改为 `dist/main.mjs`,通过读 `package.json` 的 `bin` 字段自适应;`KIMI_CODE_HOME` 强制用持久目录(`deps.stateDir/native/kimi`) | Kimi Code 切换报 `Kimi Code ACP 提前退出(exit 1)` —— 0.39.x 重写了入口路径 |
 | 6 | `lib/index.js` | 新增 `ALLOWED_REMOTE_ALL = true` 常量;`isWhitelistedOrigin` 命中后直接返回 `true`(原本按 host 精确匹配) | fork 用户只走 dsh-bridge 访问,换 IP 服务器或对外二次分发时不再需要改白名单 |
-| 7 | `lib/runtime.js`、`lib/client.js` | 同时读取旧版 `session.events` / `session.agentPreset` 与新版 `snapshotEvents()` / `projectionValues.agentPreset`;blank 欢迎页只保留模型按钮左侧的 Harness 选择器 | DSH 0.1.2 更新后运行时报事件不可迭代、Harness 控件消失或重复显示 |
+| 7 | `lib/runtime.js`、`lib/client.js` | 同时读取旧版 `session.events` / `session.agentPreset` 与新版 `snapshotEvents()` / `projectionValues.agentPreset`;blank 欢迎页与运行中共用标准 Harness 选择器 | DSH 0.1.2 更新后运行时报事件不可迭代、Harness 控件消失或重复显示 |
 | 8 | `setup/install.mjs` | Windows 上通过 Node 直接执行 pnpm 入口，不再 spawn `pnpm.cmd` | Node 24 + Windows 运行安装器时报 `spawnSync pnpm.cmd EINVAL` |
 
 ### 安全说明
