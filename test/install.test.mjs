@@ -8,6 +8,14 @@ import test from 'node:test'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
+test('Windows installer invokes pnpm through Node instead of pnpm.cmd', async () => {
+  const source = await readFile(join(ROOT, 'setup', 'install.mjs'), 'utf8')
+
+  assert.match(source, /process\.platform === 'win32' \? process\.execPath : 'pnpm'/)
+  assert.match(source, /'node_modules', 'pnpm', 'bin', 'pnpm\.cjs'/)
+  assert.doesNotMatch(source, /execFileSync\(process\.platform === 'win32' \? 'pnpm\.cmd'/)
+})
+
 test('installer links one fixed harness-ally preset into the Web Profile idempotently', async () => {
   const dshHome = await mkdtemp(join(tmpdir(), 'dsh-ally-install-'))
   const presetRoot = join(dshHome, '.agent-presets', 'harness-ally')

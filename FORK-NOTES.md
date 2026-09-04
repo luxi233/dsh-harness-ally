@@ -57,6 +57,9 @@ nothing for you — it only activates when `req.headers.host` is `127.0.0.1` / `
 | `package.json` | Bumped to `0.12.1-fork.3`; description documents the fork purpose |
 | `lib/index.js` (additional patch in fork.2) | New `ALLOWED_REMOTE_ALL = true` toggle; `isWhitelistedOrigin` returns `true` when set, bypassing per-host match |
 | `lib/index.js`, `lib/kimi-acp.js` (fork.3) | Removed the fork-only unbounded `%TEMP%\dsh-ally-debug.log` diagnostic logging |
+| `lib/runtime.js`, `lib/client.js` (fork.4) | Supports both legacy `session.events` / `session.agentPreset` and DSH 0.1.2 `snapshotEvents()` / `projectionValues.agentPreset`; suppresses the duplicate in-composer selector for blank welcome sessions and applies the retained welcome selection to that blank Session |
+| `setup/install.mjs` (fork.4) | Runs pnpm through its JavaScript entry on Windows, avoiding Node 24's `spawnSync pnpm.cmd EINVAL` failure |
+| `package.json` (fork.4) | Bumped the fork version to `0.12.1-fork.4` |
 
 ## Install
 

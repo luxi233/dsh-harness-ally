@@ -39,7 +39,7 @@ profile.dsh ||= {}
 profile.dsh.profile ||= {}
 profile.dsh.profile.bundles ||= []
 
-const relativeRoot = relative(PROFILE_DIR, ROOT).split(sep).join('/')
+const relativeRoot = relative(PROFILE_DIR, EXPECTED_ROOT).split(sep).join('/')
 const linkTarget = `link:${relativeRoot}`
 let changed = false
 if (profile.dependencies[PACKAGE_NAME] !== linkTarget) {
@@ -65,7 +65,11 @@ if (changed) {
 
 if (!SKIP_PNPM) {
   console.log('→ 执行 pnpm install 建立本地 link…')
-  execFileSync(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', ['install'], {
+  const command = process.platform === 'win32' ? process.execPath : 'pnpm'
+  const args = process.platform === 'win32'
+    ? [join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'npm', 'node_modules', 'pnpm', 'bin', 'pnpm.cjs'), 'install']
+    : ['install']
+  execFileSync(command, args, {
     cwd: PROFILE_DIR,
     stdio: 'inherit',
   })

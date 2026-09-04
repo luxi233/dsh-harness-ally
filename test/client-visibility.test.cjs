@@ -7,9 +7,10 @@ const vm = require('node:vm')
 const clientPath = path.join(__dirname, '..', 'lib', 'client.js')
 const clientSource = fs.readFileSync(clientPath, 'utf8')
 
-function loadClient(agentPreset, { selectorOpen = false } = {}) {
+function loadClient(agentPreset, { selectorOpen = false, projectionValues = false } = {}) {
   const sessionId = 'session-1'
-  const listState = { current: sessionId, byId: { [sessionId]: { agentPreset } } }
+  const session = projectionValues ? { projectionValues: { agentPreset } } : { agentPreset }
+  const listState = { current: sessionId, byId: { [sessionId]: session } }
   const registrations = []
   const definitions = []
   const React = {
@@ -24,9 +25,16 @@ function loadClient(agentPreset, { selectorOpen = false } = {}) {
   const context = {
     module: { exports: {} },
     console,
+    MutationObserver: class {
+      observe() {}
+      disconnect() {}
+    },
     document: {
       createElement() { return { dataset: {}, remove() {} } },
       head: { appendChild() {} },
+      body: {},
+      querySelector() { return null },
+      querySelectorAll() { return [] },
     },
     fetch() { throw new Error('fetch should not run in render-only tests') },
     window: {
@@ -65,12 +73,12 @@ function loadClient(agentPreset, { selectorOpen = false } = {}) {
   }
 }
 
-function selectorProps(fixture, running = false) {
+function selectorProps(fixture, running = false, blank = false) {
   return {
     sessionId: fixture.sessionId,
     t: (key) => key,
     useSessions: (select) => select(fixture.listState),
-    useSession: (select) => select({ running }),
+    useSession: (select) => select({ running, blank }),
   }
 }
 
@@ -79,10 +87,23 @@ test('Harness selector is hidden outside the alliance preset', () => {
   assert.equal(fixture.inputRight.component(selectorProps(fixture)), null)
 })
 
+test('Harness selector reads the current projectionValues agent preset field', () => {
+  const fixture = loadClient('harness-ally', { projectionValues: true })
+  const rendered = fixture.inputRight.component(selectorProps(fixture))
+
+  assert.equal(rendered.props.className, 'ally-engine')
+})
+
 test('new-session screen never inherits Harness visibility from a stale prior alliance session', () => {
   const fixture = loadClient('harness-ally')
   fixture.listState.current = undefined
   assert.equal(fixture.inputRight.component(selectorProps(fixture)), null)
+})
+
+test('blank alliance sessions leave the welcome-page selector as the only Harness control', () => {
+  const fixture = loadClient('harness-ally', { projectionValues: true })
+
+  assert.equal(fixture.inputRight.component(selectorProps(fixture, false, true)), null)
 })
 
 test('Harness selector is a compact engine chip inside alliance sessions', () => {
