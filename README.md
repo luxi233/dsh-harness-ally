@@ -1,7 +1,7 @@
 # Harness联盟模式（DSH Agent Preset）
 
 > **⚠️ 这是一个个人 fork** —— 基于 [`BaronCyrus/dsh-harness-ally`](https://github.com/BaronCyrus/dsh-harness-ally)@`0.12.1`。
-> 当前 fork 版本 `0.12.1-fork.5`,加了 **Windows + dsh-bridge customTunnel 远程访问 + Kimi Code 0.39.x + DSH 0.1.2 兼容**的补丁。
+> 当前 fork 版本 `0.12.1-fork.6`,加了 **Windows + dsh-bridge customTunnel 远程访问 + Kimi Code 0.39.x + DSH 0.1.2 兼容**的补丁。
 > 完整改动说明见 [`FORK-NOTES.md`](./FORK-NOTES.md)。
 > 上游有更新时,本 fork 会 rebase 同步(`git fetch upstream && git rebase upstream/main`)。
 
@@ -48,6 +48,7 @@
 | 6 | `lib/index.js` | 新增 `ALLOWED_REMOTE_ALL = true` 常量;`isWhitelistedOrigin` 命中后直接返回 `true`(原本按 host 精确匹配) | fork 用户只走 dsh-bridge 访问,换 IP 服务器或对外二次分发时不再需要改白名单 |
 | 7 | `lib/runtime.js`、`lib/client.js` | 同时读取旧版 `session.events` / `session.agentPreset` 与新版 `snapshotEvents()` / `projectionValues.agentPreset`;blank 欢迎页与运行中共用标准 Harness 选择器 | DSH 0.1.2 更新后运行时报事件不可迭代、Harness 控件消失或重复显示 |
 | 8 | `setup/install.mjs` | Windows 上通过 Node 直接执行 pnpm 入口，不再 spawn `pnpm.cmd` | Node 24 + Windows 运行安装器时报 `spawnSync pnpm.cmd EINVAL` |
+| 9 | `lib/client.js` | 会话切换时等待 session snapshot 和 CLI 状态共同就绪；短暂的“会话尚未加载”自动重试 | 避免已安装 Harness 瞬间误显示“安装”或短暂显示“会话不存在” |
 
 ### 安全说明
 

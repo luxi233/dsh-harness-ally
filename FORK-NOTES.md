@@ -62,6 +62,8 @@ nothing for you — it only activates when `req.headers.host` is `127.0.0.1` / `
 | `package.json` (fork.4) | Bumped the fork version to `0.12.1-fork.4` |
 | `lib/client.js` (fork.5) | Removes the DOM-injected welcome selector; blank sessions use the same `conversation.input.right` Harness selector as active sessions |
 | `package.json` (fork.5) | Bumped the fork version to `0.12.1-fork.5` |
+| `lib/client.js` (fork.6) | Treats session-switch 404 responses as a bounded loading transition; waits for both snapshot and CLI availability before showing install actions |
+| `package.json` (fork.6) | Bumped the fork version to `0.12.1-fork.6` |
 
 ## Install
 
