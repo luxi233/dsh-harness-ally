@@ -1,7 +1,7 @@
 # Harness联盟模式（DSH Agent Preset）
 
 > **⚠️ 这是一个个人 fork** —— 基于 [`BaronCyrus/dsh-harness-ally`](https://github.com/BaronCyrus/dsh-harness-ally)@`0.12.1`。
-> 当前 fork 版本 `0.12.1-fork.6`,加了 **Windows + dsh-bridge customTunnel 远程访问 + Kimi Code 0.39.x + DSH 0.1.2 兼容**的补丁。
+> 当前 fork 版本 `0.12.1-fork.7`,加了 **Windows + dsh-bridge customTunnel 远程访问 + Kimi Code 0.39.x + DSH 0.1.2 兼容**的补丁，并修正 Harness 选择器的间距与对齐。
 > 完整改动说明见 [`FORK-NOTES.md`](./FORK-NOTES.md)。
 > 上游有更新时,本 fork 会 rebase 同步(`git fetch upstream && git rebase upstream/main`)。
 
