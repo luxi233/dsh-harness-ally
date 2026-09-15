@@ -456,3 +456,30 @@ test('Devin ACP sends images on a resumed native session through session/load', 
     mimeType: 'image/png',
   })
 })
+
+test('Devin ACP translates a devin-provider model selection into --model', async () => {
+  const f = fixture()
+  const run = await startDevinAcpRun(f.deps, { ...f.request, provider: 'devin', model: 'claude-opus-4.6' })
+  const eventPromise = collect(run.stream)
+  await f.terminalGate
+  f.spawns[0].handle.complete()
+  const [, result] = await Promise.all([eventPromise, run.result])
+  await run.dispose()
+
+  assert.equal(result.stopReason, 'completed')
+  const argv = f.spawns[0].spec.argv
+  assert.deepEqual(argv.slice(argv.indexOf('--model'), argv.indexOf('--model') + 2), ['--model', 'claude-opus-4.6'])
+})
+
+test('Devin ACP does not forward non-devin provider model selections', async () => {
+  const f = fixture()
+  const run = await startDevinAcpRun(f.deps, { ...f.request, provider: 'minimax-cn', model: 'MiniMax-M3' })
+  const eventPromise = collect(run.stream)
+  await f.terminalGate
+  f.spawns[0].handle.complete()
+  const [, result] = await Promise.all([eventPromise, run.result])
+  await run.dispose()
+
+  assert.equal(result.stopReason, 'completed')
+  assert.equal(f.spawns[0].spec.argv.includes('--model'), false)
+})
