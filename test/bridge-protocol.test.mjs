@@ -225,3 +225,109 @@ test('Messages bridge maps max-token finishes without exposing reasoning', async
     await bridge.close()
   }
 })
+
+test('Claude bridge stores base64 image blocks as attachments and forwards image refs', async () => {
+  const calls = []
+  const saved = []
+  const bridge = createModelBridge({
+    llm: { stream(options) { calls.push(options); return (async function* () { yield { type: 'finish', reason: { kind: 'stop' } } })() } },
+    attachments: () => ({
+      async saveImage(input) {
+        saved.push(input)
+        return { attachmentId: 'sha256:' + 'ab'.repeat(32), mediaType: input.mediaType, bytes: input.data.byteLength, width: 1, height: 1 }
+      },
+    }),
+  })
+  try {
+    const route = await bridge.open('provider', 'model')
+    const response = await fetch(`${route.claudeBaseUrl}/${route.token}/v1/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'UE5H' } },
+          { type: 'text', text: 'describe' },
+        ] }],
+        max_tokens: 10,
+        stream: true,
+      }),
+    })
+    await response.text()
+
+    assert.equal(saved.length, 1)
+    assert.equal(saved[0].mediaType, 'image/png')
+    assert.equal(saved[0].data.toString('base64'), 'UE5H')
+    assert.deepEqual(calls[0].messages[0].content.map((block) => block.type), ['image', 'text'])
+    assert.equal(calls[0].messages[0].content[0].attachment.attachmentId, 'sha256:' + 'ab'.repeat(32))
+    route.close()
+  } finally {
+    await bridge.close()
+  }
+})
+
+test('Claude bridge degrades to a text placeholder when attachment storage is absent', async () => {
+  const calls = []
+  const bridge = createModelBridge({
+    llm: { stream(options) { calls.push(options); return (async function* () { yield { type: 'finish', reason: { kind: 'stop' } } })() } },
+    attachments: () => undefined,
+  })
+  try {
+    const route = await bridge.open('provider', 'model')
+    const response = await fetch(`${route.claudeBaseUrl}/${route.token}/v1/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'UE5H' } },
+          { type: 'text', text: 'describe' },
+        ] }],
+        stream: true,
+      }),
+    })
+    await response.text()
+
+    const [image, text] = calls[0].messages[0].content
+    assert.equal(image.type, 'text')
+    assert.match(image.text, /image omitted/)
+    assert.equal(text.text, 'describe')
+    route.close()
+  } finally {
+    await bridge.close()
+  }
+})
+
+test('Codex bridge stores input_image data URLs and input_file payloads as attachments', async () => {
+  const calls = []
+  const saved = { images: [], files: [] }
+  const bridge = createModelBridge({
+    llm: { stream(options) { calls.push(options); return (async function* () { yield { type: 'finish', reason: { kind: 'stop' } } })() } },
+    attachments: () => ({
+      async saveImage(input) {
+        saved.images.push(input)
+        return { attachmentId: 'sha256:' + 'cd'.repeat(32), mediaType: input.mediaType, bytes: input.data.byteLength, width: 1, height: 1 }
+      },
+      async saveFile(input) {
+        saved.files.push(input)
+        return { attachmentId: 'sha256:' + 'ef'.repeat(32), name: input.name, bytes: input.data.byteLength }
+      },
+    }),
+  })
+  try {
+    const route = await bridge.open('provider', 'model')
+    await codexResponse(route, [{ role: 'user', content: [
+      { type: 'input_text', text: 'look' },
+      { type: 'input_image', image_url: 'data:image/png;base64,UE5H' },
+      { type: 'input_file', file_data: 'aGVsbG8=', filename: 'note.txt' },
+    ] }])
+
+    assert.equal(saved.images.length, 1)
+    assert.equal(saved.images[0].mediaType, 'image/png')
+    assert.equal(saved.files.length, 1)
+    assert.equal(saved.files[0].name, 'note.txt')
+    assert.equal(saved.files[0].data.toString(), 'hello')
+    assert.deepEqual(calls[0].messages[0].content.map((block) => block.type), ['text', 'image', 'file'])
+    route.close()
+  } finally {
+    await bridge.close()
+  }
+})
