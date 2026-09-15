@@ -43,7 +43,7 @@ function fixture({ preset = 'harness-ally', status = 'idle', harness = 'dsh', re
     },
   }
   const gateway = {
-    async availability() { return { 'claude-code': true, codex: true, 'kimi-code': true } },
+    async availability() { return { 'claude-code': true, codex: true, 'kimi-code': true, devin: true } },
     async available() { if (availabilityGate) await availabilityGate; return true },
     start(selected, request) {
       starts.push({ selected, request })
@@ -273,7 +273,7 @@ test('snapshot exposes authoritative Harness selection and availability', async 
   assert.deepEqual(await runtime.snapshot(session.id), {
     eligible: true,
     harness: 'codex',
-    providers: { dsh: true, 'claude-code': true, codex: true, 'kimi-code': true },
+    providers: { dsh: true, 'claude-code': true, codex: true, 'kimi-code': true, devin: true },
     dispatches: [],
     active: null,
   })
@@ -343,7 +343,7 @@ test('unmarked session-scoped LLM calls bypass the foreground Harness router', a
 })
 
 test('external prompt identifies the selected Harness separately from its DSH host', async () => {
-  for (const [harness, label] of [['claude-code', 'Claude Code'], ['codex', 'Codex'], ['kimi-code', 'Kimi Code']]) {
+  for (const [harness, label] of [['claude-code', 'Claude Code'], ['codex', 'Codex'], ['kimi-code', 'Kimi Code'], ['devin', 'Devin']]) {
     const { runtime, session, starts } = fixture({ harness })
     session.append('turn/start', { turn: 1 })
     session.append('step/start', { turn: 1, step: 1 })
@@ -871,14 +871,30 @@ test('later-step start failures preserve the prior visible turn badge', async ()
   assert.equal(recordedDispatches[0].started, true)
 })
 
-test('external Harness rejects image input instead of silently dropping it', async () => {
+test('external Harness forwards the current request image refs instead of rejecting', async () => {
+  const { runtime, session, starts, recordedDispatches } = fixture({ harness: 'codex' })
+  session.append('turn/start', { turn: 1 })
+  session.append('step/start', { turn: 1, step: 1 })
+  const attachment = { attachmentId: 'image-1', mediaType: 'image/png', bytes: 4, width: 1, height: 1 }
+
+  await collect(runtime.route({
+    sessionId: session.id, agentLoop: true, provider: 'p', model: 'm',
+    messages: [{ role: 'user', content: [{ type: 'image', attachment }, { type: 'text', text: 'what is this' }] }],
+  }, fallback().next))
+
+  assert.equal(starts.length, 1)
+  assert.deepEqual(starts[0].request.images, [{ attachment }])
+  assert.equal(recordedDispatches.length > 0, true)
+})
+
+test('external Harness still rejects unresolvable image blocks', async () => {
   const { runtime, session, starts, recordedDispatches } = fixture({ harness: 'codex' })
   session.append('turn/start', { turn: 1 })
   session.append('step/start', { turn: 1, step: 1 })
 
   await assert.rejects(collect(runtime.route({
     sessionId: session.id, agentLoop: true, provider: 'p', model: 'm',
-    messages: [{ role: 'user', content: [{ type: 'image', attachment: { attachmentId: 'image-1' } }] }],
+    messages: [{ role: 'user', content: [{ type: 'image' }] }],
   }, fallback().next)), /不支持图片输入/)
   assert.equal(starts.length, 0)
   assert.deepEqual(recordedDispatches, [])
@@ -922,4 +938,77 @@ test('aborted Harness results become a terminal aborted model chunk', async () =
   }, fallback().next))
 
   assert.equal(chunks.at(-1).reason.kind, 'aborted')
+})
+
+test('external Harness keeps image markers in canonical text and degrades historical images', async () => {
+  const { runtime, session, starts } = fixture({ harness: 'kimi-code' })
+  session.append('turn/start', { turn: 1 })
+  session.append('step/start', { turn: 1, step: 1 })
+  const attachment = { attachmentId: 'image-1', mediaType: 'image/png', bytes: 4, width: 1, height: 1 }
+  const secondAttachment = { attachmentId: 'image-2', mediaType: 'image/jpeg', bytes: 4, width: 1, height: 1 }
+
+  await collect(runtime.route({
+    sessionId: session.id, agentLoop: true, provider: 'p', model: 'm',
+    messages: [
+      { role: 'user', content: [{ type: 'image', attachment: { attachmentId: 'old-img', mediaType: 'image/png' } }, { type: 'text', text: 'earlier' }] },
+      { role: 'assistant', source: { kind: 'model' }, content: [{ type: 'text', text: 'an answer' }] },
+      { role: 'user', content: [{ type: 'image', attachment }, { type: 'image', attachment: secondAttachment }, { type: 'text', text: 'now these' }] },
+    ],
+  }, fallback().next))
+
+  assert.equal(starts.length, 1)
+  assert.deepEqual(starts[0].request.images, [{ attachment }, { attachment: secondAttachment }])
+  const rendered = starts[0].request.prompt[0].text
+  assert.match(rendered, /\[image omitted from external Harness history\]/)
+  assert.equal((rendered.match(/\[image attached\]/g) ?? []).length, 2)
+})
+
+test('external Harness accepts an image-only request with a fallback text block', async () => {
+  const { runtime, session, starts } = fixture({ harness: 'codex' })
+  session.append('turn/start', { turn: 1 })
+  session.append('step/start', { turn: 1, step: 1 })
+  const attachment = { attachmentId: 'image-1', mediaType: 'image/png' }
+
+  await collect(runtime.route({
+    sessionId: session.id, agentLoop: true, provider: 'p', model: 'm',
+    messages: [{ role: 'user', content: [{ type: 'image', attachment }] }],
+  }, fallback().next))
+
+  assert.equal(starts.length, 1)
+  assert.deepEqual(starts[0].request.images, [{ attachment }])
+  assert.match(starts[0].request.prompt[0].text, /\[image attached\]/)
+})
+
+test('external Harness forwards current request file refs and marks canonical text', async () => {
+  const { runtime, session, starts } = fixture({ harness: 'kimi-code' })
+  session.append('turn/start', { turn: 1 })
+  session.append('step/start', { turn: 1, step: 1 })
+  const attachment = { attachmentId: 'file-1', name: 'report.pdf' }
+
+  await collect(runtime.route({
+    sessionId: session.id, agentLoop: true, provider: 'p', model: 'm',
+    messages: [
+      { role: 'user', content: [{ type: 'file', attachment: { attachmentId: 'old-file' } }, { type: 'text', text: 'earlier' }] },
+      { role: 'assistant', source: { kind: 'model' }, content: [{ type: 'text', text: 'ok' }] },
+      { role: 'user', content: [{ type: 'file', attachment }, { type: 'text', text: 'read this' }] },
+    ],
+  }, fallback().next))
+
+  assert.equal(starts.length, 1)
+  assert.deepEqual(starts[0].request.files, [{ attachment }])
+  const rendered = starts[0].request.prompt[0].text
+  assert.match(rendered, /\[file omitted from external Harness history\]/)
+  assert.match(rendered, /\[file attached: report\.pdf\]/)
+})
+
+test('external Harness still rejects malformed file blocks', async () => {
+  const { runtime, session, starts } = fixture({ harness: 'codex' })
+  session.append('turn/start', { turn: 1 })
+  session.append('step/start', { turn: 1, step: 1 })
+
+  await assert.rejects(collect(runtime.route({
+    sessionId: session.id, agentLoop: true, provider: 'p', model: 'm',
+    messages: [{ role: 'user', content: [{ type: 'file' }] }],
+  }, fallback().next)), /不支持文件输入/)
+  assert.equal(starts.length, 0)
 })

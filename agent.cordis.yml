@@ -24,8 +24,9 @@
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
-    text: >-
-      You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.
+    suffix: Your working directory is {{cwd}}.
+    prefix: >-
+      You are a coding agent powered by the {{model}} model.
 
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
@@ -225,6 +226,14 @@
       config:
         provider: ally-kimi-code
         toolName: subagent_kimi_code
+        backgroundMode: one-shot
+        maxDepth: provider-managed
+
+    - id: tool-subagent-devin
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: ally-devin
+        toolName: subagent_devin
         backgroundMode: one-shot
         maxDepth: provider-managed
 

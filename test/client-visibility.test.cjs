@@ -132,22 +132,25 @@ test('Harness menu keeps unavailable Harnesses in a checking state until availab
     'Claude Code',
     'Codex',
     'Kimi Code',
+    'Devin',
   ])
-  assert.deepEqual(options.map((option) => option.props.children[0].type), ['svg', 'svg', 'svg', 'svg'])
+  assert.deepEqual(options.map((option) => option.props.children[0].type), ['svg', 'svg', 'svg', 'svg', 'svg'])
   assert.deepEqual(options.map((option) => option.props.children[0].props['aria-label']), [
     'DeepSeek Harness',
     'Claude Code',
     'Codex',
     'Kimi Code',
+    'Devin',
   ])
   assert.equal(options[0].type, 'button')
-  assert.deepEqual(options.slice(1).map((option) => option.type), ['div', 'div', 'div'])
+  assert.deepEqual(options.slice(1).map((option) => option.type), ['div', 'div', 'div', 'div'])
   assert.deepEqual(options.slice(1).map((option) => option.props.children[2].props.className), [
     'ally-engine-check',
     'ally-engine-check',
     'ally-engine-check',
+    'ally-engine-check',
   ])
-  assert.deepEqual(options.slice(1).map((option) => option.props.children[2].props.children[0]), ['cli.checking', 'cli.checking', 'cli.checking'])
+  assert.deepEqual(options.slice(1).map((option) => option.props.children[2].props.children[0]), ['cli.checking', 'cli.checking', 'cli.checking', 'cli.checking'])
   assert.equal(clientSource.includes('ally-engine-desc'), false)
   assert.equal(clientSource.includes('ally-engine-hint'), false)
   assert.equal(clientSource.includes('selector.hint'), false)

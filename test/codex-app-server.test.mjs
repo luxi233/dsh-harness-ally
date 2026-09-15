@@ -10,7 +10,7 @@ async function collect(iterable) {
   return values
 }
 
-function fixture({ nativeSession, resumeFails = false } = {}) {
+function fixture({ nativeSession, resumeFails = false, attachments, readFile } = {}) {
   const requests = []
   const spawns = []
   let terminal
@@ -102,6 +102,8 @@ function fixture({ nativeSession, resumeFails = false } = {}) {
     bridge: { async open(...args) { bridgeOpens.push(args); return bridgeRoute } },
     stateDir: '/managed-state',
     async makeDirectory(path, options) { createdDirectories.push({ path, options }) },
+    attachments,
+    readFile,
   }
   const request = {
     parent: { session: { id: 'session-1', header: { cwd: '/workspace', agentPreset: 'harness-ally' } } },
@@ -141,7 +143,7 @@ test('Codex app-server streams dedicated agent message deltas without snapshot d
   assert.equal(f.spawns[0].spec.argv[1], 'app-server')
   assert.equal(f.spawns[0].spec.argv.includes('exec'), false)
   assert.deepEqual(f.requests.map((request) => request.method), ['initialize', 'thread/start', 'turn/start'])
-  assert.equal(f.requests[0].params.clientInfo.version, '0.12.1')
+  assert.match(f.requests[0].params.clientInfo.version, /^0\.12\.1/)
   assert.equal(f.requests[0].params.capabilities.experimentalApi, true)
   assert.deepEqual(f.bridgeOpens[0].slice(0, 2), ['provider', 'model'])
   assert.equal(f.requests[1].params.modelProvider, 'dsh-ally')
@@ -226,4 +228,103 @@ test('Codex cancellation sends turn/interrupt before terminating the app-server'
   assert.deepEqual(f.requests.at(-1).params, { threadId: 'thread-1', turnId: 'turn-1' })
   assert.equal(f.spawns[0].handle.terminated, 1)
   assert.equal(f.bridgeCloses, 1)
+})
+
+test('Codex resumes a thread and still forwards images on the resumed turn', async () => {
+  const adopted = []
+  const nativeSession = {
+    mode: 'resume',
+    vendorId: 'thread-old',
+    prompt: 'USER\nlook at this image',
+    adopt(id) { adopted.push(id) },
+    async fallback() { throw new Error('unexpected fallback') },
+  }
+  const f = fixture({
+    nativeSession,
+    attachments: { imageHostPath: (ref) => ref?.attachmentId === 'img-1' ? '/host/img.png' : undefined },
+    readFile: async () => Buffer.from('PNGDATA'),
+  })
+  f.request.images = [{ attachment: { attachmentId: 'img-1', mediaType: 'image/png' } }]
+  const run = await startCodexAppServerRun(f.deps, f.request)
+  await f.terminalGate
+  f.spawns[0].handle.send({ method: 'turn/completed', params: { threadId: 'thread-old', turn: { id: 'turn-1', status: 'completed' } } })
+  const result = await run.result
+
+  assert.equal(result.stopReason, 'completed')
+  assert.deepEqual(f.requests.map((request) => request.method), ['initialize', 'thread/resume', 'turn/start'])
+  const input = f.requests[2].params.input
+  assert.deepEqual(input[0], { type: 'localImage', path: '/host/img.png' })
+  assert.equal(input.at(-1).text, 'USER\nlook at this image')
+  assert.deepEqual(adopted, ['thread-old'])
+})
+
+test('Codex app-server forwards attached images as localImage input items', async () => {
+  const f = fixture({
+    attachments: { imageHostPath: (ref) => ref?.attachmentId === 'img-1' ? '/host/img.png' : undefined },
+    readFile: async () => Buffer.from('PNGDATA'),
+  })
+  f.request.images = [{ attachment: { attachmentId: 'img-1', mediaType: 'image/png', bytes: 7, width: 1, height: 1 } }]
+
+  const run = await startCodexAppServerRun(f.deps, f.request)
+  const eventPromise = collect(run.stream)
+  await f.terminalGate
+  f.spawns[0].handle.send({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } } })
+  const [, result] = await Promise.all([eventPromise, run.result])
+  await run.dispose()
+
+  assert.equal(result.stopReason, 'completed')
+  const turn = f.requests.find((request) => request.method === 'turn/start')
+  assert.deepEqual(turn.params.input, [
+    { type: 'localImage', path: '/host/img.png' },
+    { type: 'text', text: 'do work' },
+  ])
+})
+
+test('Codex app-server forwards inline image data as a data-URL image item', async () => {
+  const f = fixture()
+
+  const run = await startCodexAppServerRun(f.deps, {
+    ...f.request,
+    prompt: [
+      { type: 'image', data: 'aW5saW5l', mediaType: 'image/png' },
+      { type: 'text', text: 'describe' },
+    ],
+  })
+  const eventPromise = collect(run.stream)
+  await f.terminalGate
+  f.spawns[0].handle.send({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } } })
+  const [, result] = await Promise.all([eventPromise, run.result])
+  await run.dispose()
+
+  assert.equal(result.stopReason, 'completed')
+  const turn = f.requests.find((request) => request.method === 'turn/start')
+  assert.deepEqual(turn.params.input, [
+    { type: 'image', url: 'data:image/png;base64,aW5saW5l' },
+    { type: 'text', text: 'describe' },
+  ])
+})
+
+test('Codex app-server forwards attached files as host path references in the prompt text', async () => {
+  const f = fixture({
+    attachments: { fileHostPath: (ref) => ref?.attachmentId === 'file-1' ? '/host/report.pdf' : undefined },
+  })
+  f.request.files = [{ attachment: { attachmentId: 'file-1', name: 'report.pdf' } }]
+  const run = await startCodexAppServerRun(f.deps, f.request)
+  await f.terminalGate
+  f.spawns[0].handle.send({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } } })
+  const result = await run.result
+
+  assert.equal(result.stopReason, 'completed')
+  const input = f.requests[2].params.input
+  const text = input.at(-1).text
+  assert.match(text, /do work/)
+  assert.match(text, /- \/host\/report\.pdf/)
+})
+
+test('Codex app-server fails closed when a file attachment has no host path', async () => {
+  const f = fixture({ attachments: { fileHostPath: () => undefined } })
+  f.request.files = [{ attachment: { attachmentId: 'gone' } }]
+
+  await assert.rejects(startCodexAppServerRun(f.deps, f.request), /无法解析文件附件/)
+  assert.equal(f.spawns.length, 0)
 })

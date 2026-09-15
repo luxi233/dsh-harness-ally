@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
@@ -11,10 +12,14 @@ function fixture({ globals = {}, installOk = true } = {}) {
   const resolves = []
   const binName = (name) => process.platform === 'win32' ? `${name}.cmd` : name
   const managedPath = (harness, name) => join(managedRoot, harness, 'node_modules', '.bin', binName(name))
+  const devinUserBin = process.platform === 'win32'
+    ? join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'devin', 'cli', 'bin', 'devin.exe')
+    : join(homedir(), '.local', 'bin', 'devin')
   const subprocess = {
     async resolveExecutable(command) {
       resolves.push(command)
       if (command === 'npm') return '/usr/bin/npm'
+      if (command === 'sh' || command === 'powershell') return `/bin/${command}`
       if (globals[command]) return globals[command]
       if (managed.has(command)) return command
       throw new Error(`missing ${command}`)
@@ -29,6 +34,7 @@ function fixture({ globals = {}, installOk = true } = {}) {
           if (packageName.startsWith('@anthropic-ai/claude-code@')) managed.add(managedPath('claude-code', 'claude'))
           if (packageName.startsWith('@openai/codex@')) managed.add(managedPath('codex', 'codex'))
           if (packageName.startsWith('@moonshot-ai/kimi-code@')) managed.add(managedPath('kimi-code', 'kimi'))
+          if (spec.argv.some((arg) => typeof arg === 'string' && arg.includes('cli.devin.ai'))) managed.add(devinUserBin)
         }
         settle({ exitCode: installOk ? 0 : 1, signal: null })
       })
@@ -45,7 +51,7 @@ function fixture({ globals = {}, installOk = true } = {}) {
     },
   }
   const manager = createCliManager({ subprocess, managedRoot, mkdir: async () => {}, rm: async () => {} })
-  return { manager, managedRoot, managedPath, managed, spawns, resolves }
+  return { manager, managedRoot, managedPath, managed, spawns, resolves, devinUserBin }
 }
 
 test('CLI status detects global first, then DSH-managed, then missing', async () => {
@@ -58,6 +64,7 @@ test('CLI status detects global first, then DSH-managed, then missing', async ()
     'claude-code': { available: true, source: 'global', installing: false },
     codex: { available: false, source: 'missing', installing: false },
     'kimi-code': { available: false, source: 'missing', installing: false },
+    devin: { available: false, source: 'missing', installing: false },
   })
   assert.equal(await f.manager.resolve('claude-code'), '/usr/local/bin/claude')
 })
@@ -100,6 +107,17 @@ test('Kimi Code installs the official package into its managed prefix', async ()
   assert.equal(await f.manager.resolve('kimi-code'), f.managedPath('kimi-code', 'kimi'))
 })
 
+test('Devin installs through the official script and resolves from the user install location', async () => {
+  const f = fixture()
+
+  const installed = await f.manager.install('devin')
+
+  assert.deepEqual(installed, { available: true, source: 'global', installing: false })
+  assert.equal(f.spawns.length, 1)
+  assert.equal(f.spawns[0].argv.some((arg) => typeof arg === 'string' && arg.includes('cli.devin.ai')), true)
+  assert.equal(await f.manager.resolve('devin'), f.devinUserBin)
+})
+
 test('install is idempotent for global CLIs and coalesces concurrent managed installs', async () => {
   const global = fixture({ globals: { claude: '/opt/bin/claude' } })
   assert.deepEqual(await global.manager.install('claude-code'), { available: true, source: 'global', installing: false })
@@ -118,5 +136,6 @@ test('install is idempotent for global CLIs and coalesces concurrent managed ins
 test('failed or unsupported installs fail without exposing npm output', async () => {
   const failed = fixture({ installOk: false })
   await assert.rejects(failed.manager.install('codex'), /Codex CLI 安装失败/)
+  await assert.rejects(failed.manager.install('devin'), /Devin CLI 安装失败/)
   await assert.rejects(failed.manager.install('unknown'), /不支持的 Harness/)
 })

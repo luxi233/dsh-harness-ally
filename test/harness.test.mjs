@@ -79,6 +79,8 @@ function fixture(events = {}) {
     cliManager: events.cliManager,
     nativeSessions: events.nativeSessions,
     stateDir: events.stateDir,
+    attachments: events.attachments,
+    readFile: events.readFile,
   })
   return { gateway, spawns, resolves, confined, bridgeOpens }
 }
@@ -119,6 +121,90 @@ test('Claude adapter is stateless and receives the selected model', async () => 
   assert.equal(argv.includes('--no-session-persistence'), true)
   assert.deepEqual(argv.slice(-2), ['--model', 'claude-opus-4-6'])
   assert.equal(result.output[0].text, 'CLAUDE_OK')
+})
+
+test('Claude forwards attachment images through stream-json stdin input', async () => {
+  const f = fixture({
+    stdout: [JSON.stringify({ type: 'result', subtype: 'success', result: 'SAW_IMAGE' })],
+    attachments: { imageHostPath: (ref) => ref?.attachmentId === 'img-1' ? '/host/img.png' : undefined },
+    readFile: async (path) => { assert.equal(path, '/host/img.png'); return Buffer.from('PNGDATA') },
+  })
+
+  const run = await f.gateway.start('claude-code', {
+    ...request('describe the image'),
+    images: [{ attachment: { attachmentId: 'img-1', mediaType: 'image/png', bytes: 7, width: 1, height: 1 } }],
+  })
+  const result = await run.result
+
+  const argv = f.spawns[0].spec.argv
+  assert.equal(argv[argv.indexOf('--input-format') + 1], 'stream-json')
+  const message = JSON.parse(f.spawns[0].handle.stdinText)
+  assert.equal(message.type, 'user')
+  assert.deepEqual(message.message.content, [
+    { type: 'image', source: { type: 'base64', media_type: 'image/png', data: Buffer.from('PNGDATA').toString('base64') } },
+    { type: 'text', text: 'describe the image' },
+  ])
+  assert.equal(result.output[0].text, 'SAW_IMAGE')
+})
+
+test('Claude keeps plain text input when no image is present', async () => {
+  const f = fixture({ stdout: [JSON.stringify({ type: 'result', subtype: 'success', result: 'OK' })] })
+
+  const run = await f.gateway.start('claude-code', request('plain task'))
+  await run.result
+
+  const argv = f.spawns[0].spec.argv
+  assert.equal(argv[argv.indexOf('--input-format') + 1], 'text')
+  assert.equal(f.spawns[0].handle.stdinText, 'plain task')
+})
+
+test('Claude combines native-session resume with stream-json image input', async () => {
+  const adopted = []
+  const nativeSession = {
+    mode: 'resume',
+    vendorId: 'claude-session-old',
+    prompt: 'USER\nwhat is in this image',
+    adopt(id) { adopted.push(id) },
+    async fallback() { throw new Error('unexpected fallback') },
+  }
+  const f = fixture({
+    stdout: [
+      JSON.stringify({ type: 'system', subtype: 'init', session_id: 'claude-session-old' }),
+      JSON.stringify({ type: 'result', subtype: 'success', result: 'OK' }),
+    ],
+    attachments: { imageHostPath: (ref) => ref?.attachmentId === 'img-1' ? '/host/img.png' : undefined },
+    readFile: async () => Buffer.from('PNGDATA'),
+  })
+
+  const run = await f.gateway.start('claude-code', {
+    ...request('what is in this image'),
+    model: 'model-a',
+    images: [{ attachment: { attachmentId: 'img-1', mediaType: 'image/png' } }],
+    nativeSession,
+  })
+  const result = await run.result
+
+  const argv = f.spawns[0].spec.argv
+  assert.deepEqual(argv.slice(argv.indexOf('--resume'), argv.indexOf('--resume') + 2), ['--resume', 'claude-session-old'])
+  assert.equal(argv[argv.indexOf('--input-format') + 1], 'stream-json')
+  const message = JSON.parse(f.spawns[0].handle.stdinText)
+  assert.equal(message.message.content[0].type, 'image')
+  assert.equal(message.message.content[1].text, 'USER\nwhat is in this image')
+  assert.deepEqual(adopted, ['claude-session-old'])
+  assert.equal(result.stopReason, 'completed')
+})
+
+test('Claude fails closed when an attachment ref cannot be resolved to a host path', async () => {
+  const f = fixture({ attachments: { imageHostPath: () => undefined } })
+
+  await assert.rejects(
+    f.gateway.start('claude-code', {
+      ...request('describe'),
+      images: [{ attachment: { attachmentId: 'gone', mediaType: 'image/png' } }],
+    }),
+    /无法解析图片附件/,
+  )
+  assert.equal(f.spawns.length, 0)
 })
 
 test('Claude persists a fresh native session and adopts its init id', async () => {
@@ -444,7 +530,9 @@ test('foreground Claude routes the configured provider/model without putting its
   assert.equal(closed, 1)
 })
 
-test('non-danger modes are wrapped by the DSH sandbox', async () => {
+test('non-danger modes skip inner confinement and keep native argv', async () => {
+  // fork 行为:policyFor 在 alliance 下常返回 session 级策略而非 danger-full-access,
+  // adapter 不再调用 sandbox.confine 二次包裹;外层 sandbox 由 ctx.sandboxPolicy 保证。
   const f = fixture({ mode: 'workspace-write', stdout: [
     JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'ok' } }),
   ] })
@@ -452,9 +540,8 @@ test('non-danger modes are wrapped by the DSH sandbox', async () => {
   const run = await f.gateway.start('claude-code', request())
   await run.result
 
-  assert.equal(f.confined.length, 1)
-  assert.equal(f.confined[0].policy.workspaceRoot, '/workspace')
-  assert.equal(f.spawns[0].spec.argv[0], 'sandbox-runner')
+  assert.equal(f.confined.length, 0)
+  assert.equal(f.spawns[0].spec.argv[0], '/bin/claude')
 })
 
 test('provider diagnostics never expose raw stderr', async () => {
@@ -546,6 +633,6 @@ test('gateway execution and availability both use the shared CLI manager', async
 test('availability reflects executable resolution', async () => {
   const f = fixture({ missing: ['claude'] })
 
-  assert.deepEqual(await f.gateway.availability(), { 'claude-code': false, codex: true, 'kimi-code': true })
-  assert.deepEqual(f.resolves.sort(), ['claude', 'codex', 'kimi'])
+  assert.deepEqual(await f.gateway.availability(), { 'claude-code': false, codex: true, 'kimi-code': true, devin: true })
+  assert.deepEqual(f.resolves.sort(), ['claude', 'codex', 'devin', 'kimi'])
 })

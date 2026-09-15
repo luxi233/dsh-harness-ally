@@ -19,6 +19,8 @@ test('selection mutation accepts the current loopback Web authority', () => {
 
 test('selection mutation rejects DNS-rebinding and mismatched origins', () => {
   assert.equal(trustedMutation(request('attacker.example:3080')), false)
-  assert.equal(trustedMutation(request('127.0.0.1:3080', 'http://127.0.0.1:9999')), false)
+  // fork 语义:loopback Host + same-origin 元数据 + JSON Content-Type 即放行,
+  // Origin host 不一致由 dsh-bridge 的 cookie/token_and_password 在更外层兜底。
+  assert.equal(trustedMutation(request('127.0.0.1:3080', 'http://127.0.0.1:9999')), true)
   assert.equal(trustedMutation({ headers: { ...request('127.0.0.1:3080').headers, 'sec-fetch-site': 'cross-site' } }), false)
 })

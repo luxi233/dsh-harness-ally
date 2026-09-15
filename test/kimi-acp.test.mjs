@@ -38,6 +38,9 @@ function fixture({
   skillTitle = 'Skill',
   skillContinuationTimeoutMs,
   sessionFlushTimeoutMs,
+  imageCapable = false,
+  attachments,
+  readFile,
 } = {}) {
   const messages = []
   const spawns = []
@@ -86,6 +89,7 @@ function fixture({
               agentCapabilities: {
                 loadSession: resumeAdvertised,
                 sessionCapabilities: resumeAdvertised ? { resume: {} } : {},
+                ...(imageCapable ? { promptCapabilities: { image: true } } : {}),
               },
               agentInfo: { name: 'Kimi Code CLI', version: 'test' },
             } })
@@ -277,6 +281,8 @@ function fixture({
     },
     bridge: { async open(...args) { bridgeOpens.push(args); return bridgeRoute } },
     stateDir: '/managed-state',
+    attachments,
+    readFile,
     async makeDirectory(path, options) { createdDirectories.push({ path, options }) },
     async makeTempDirectory(prefix) {
       assert.match(prefix, /dsh-ally-kimi-/)
@@ -359,12 +365,12 @@ test('Kimi ACP streams message, thinking, and read-only tool activity through a 
   assert.equal(f.spawns[0].spec.env.KIMI_MODEL_PROVIDER_TYPE, 'anthropic')
   assert.equal(f.spawns[0].spec.env.KIMI_MODEL_BASE_URL, 'http://127.0.0.1:9999/claude/route')
   assert.equal(f.spawns[0].spec.env.KIMI_MODEL_THINKING_EFFORT, 'high')
-  assert.equal(f.spawns[0].spec.env.KIMI_CODE_HOME, '/tmp/dsh-ally-kimi-test')
+  assert.equal(f.spawns[0].spec.env.KIMI_CODE_HOME, '/managed-state/native/kimi')
   assert.equal(f.bridgeOpens[0][2].sessionId, 'session-1')
   assert.deepEqual(f.messages.filter((message) => message.method).map((message) => message.method), [
     'initialize', 'session/new', 'session/set_config_option', 'session/prompt',
   ])
-  assert.equal(f.messages[0].params.clientInfo.version, '0.12.1')
+  assert.match(f.messages[0].params.clientInfo.version, /^0\.12\.1/)
   assert.deepEqual(f.messages[0].params.clientCapabilities.fs, { readTextFile: false, writeTextFile: false })
   assert.deepEqual(f.messages[2].params, { sessionId: 'session-kimi', configId: 'mode', value: 'auto' })
   assert.match(f.messages[3].params.prompt[0].text, /^do work\n\nKIMI CODE REPOSITORY SKILL POLICY/)
@@ -378,7 +384,8 @@ test('Kimi ACP streams message, thinking, and read-only tool activity through a 
   })
   assert.equal(f.spawns[0].handle.terminated, 0)
   assert.equal(f.bridgeCloses, 1)
-  assert.equal(f.homeRemovals, 1)
+  // 持久 KIMI_CODE_HOME(stateDir/native/kimi)不做临时目录清理
+  assert.equal(f.homeRemovals, 0)
 })
 
 test('Kimi bounds graceful session flushing and discards a stuck native session', async () => {
@@ -860,5 +867,87 @@ test('Kimi cancellation sends session/cancel before terminating ACP', async () =
   assert.deepEqual(f.messages.at(-1).params, { sessionId: 'session-kimi' })
   assert.equal(f.spawns[0].handle.terminated, 1)
   assert.equal(f.bridgeCloses, 1)
-  assert.equal(f.homeRemovals, 1)
+  // 持久 KIMI_CODE_HOME(stateDir/native/kimi)不做临时目录清理
+  assert.equal(f.homeRemovals, 0)
+})
+
+test('Kimi ACP sends attached images as native image content blocks when advertised', async () => {
+  const f = fixture({
+    imageCapable: true,
+    attachments: { imageHostPath: (ref) => ref?.attachmentId === 'img-1' ? '/host/img.png' : undefined },
+    readFile: async (path) => { assert.equal(path, '/host/img.png'); return Buffer.from('PNGDATA') },
+  })
+  f.request.images = [{ attachment: { attachmentId: 'img-1', mediaType: 'image/png', bytes: 7, width: 1, height: 1 } }]
+
+  const run = await startKimiAcpRun(f.deps, f.request)
+  const eventPromise = collect(run.stream)
+  await f.terminalGate
+  f.spawns[0].handle.complete()
+  const [, result] = await Promise.all([eventPromise, run.result])
+  await run.dispose()
+
+  assert.equal(result.stopReason, 'completed')
+  const prompt = f.messages.find((message) => message.method === 'session/prompt')
+  assert.deepEqual(prompt.params.prompt[0], {
+    type: 'image', data: Buffer.from('PNGDATA').toString('base64'), mimeType: 'image/png',
+  })
+  assert.equal(prompt.params.prompt[1].type, 'text')
+  assert.match(prompt.params.prompt[1].text, /^do work/)
+})
+
+test('Kimi ACP degrades to host path references when the image capability is missing', async () => {
+  const f = fixture({
+    attachments: { imageHostPath: () => '/host/img.png' },
+    readFile: async () => Buffer.from('PNGDATA'),
+  })
+  f.request.images = [{ attachment: { attachmentId: 'img-1', mediaType: 'image/png' } }]
+
+  const run = await startKimiAcpRun(f.deps, f.request)
+  const eventPromise = collect(run.stream)
+  await f.terminalGate
+  f.spawns[0].handle.complete()
+  const [, result] = await Promise.all([eventPromise, run.result])
+  await run.dispose()
+
+  assert.equal(result.stopReason, 'completed')
+  const prompt = f.messages.find((message) => message.method === 'session/prompt')
+  assert.equal(prompt.params.prompt.length, 1)
+  assert.equal(prompt.params.prompt[0].type, 'text')
+  assert.match(prompt.params.prompt[0].text, /\/host\/img\.png/)
+})
+
+test('Kimi resumes a durable ACP session and sends images on the resumed turn', async () => {
+  const adopted = []
+  const nativeSession = {
+    mode: 'resume',
+    vendorId: 'session-kimi-old',
+    prompt: 'USER\nlook at this image',
+    adopt(id) { adopted.push(id) },
+    async fallback() { throw new Error('unexpected fallback') },
+  }
+  const f = fixture({
+    nativeSession,
+    imageCapable: true,
+    attachments: { imageHostPath: (ref) => ref?.attachmentId === 'img-1' ? '/host/img.png' : undefined },
+    readFile: async () => Buffer.from('PNGDATA'),
+  })
+  f.request.images = [{ attachment: { attachmentId: 'img-1', mediaType: 'image/png' } }]
+  const run = await startKimiAcpRun(f.deps, f.request)
+  await f.terminalGate
+  f.spawns[0].handle.complete()
+  const result = await run.result
+  await run.dispose()
+
+  assert.equal(result.stopReason, 'completed')
+  assert.deepEqual(f.messages.filter((message) => message.method).map((message) => message.method), [
+    'initialize', 'session/load', 'session/set_config_option', 'session/prompt',
+  ])
+  const prompt = f.messages.find((message) => message.method === 'session/prompt').params.prompt
+  assert.deepEqual(prompt[0], {
+    type: 'image',
+    data: Buffer.from('PNGDATA').toString('base64'),
+    mimeType: 'image/png',
+  })
+  assert.match(prompt.at(-1).text, /^USER\nlook at this image/)
+  assert.deepEqual(adopted, ['session-kimi-old'])
 })
