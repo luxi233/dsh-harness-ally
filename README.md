@@ -168,6 +168,7 @@ node ~/.dsh/.agent-presets/harness-ally/setup/install.mjs
 - 外部 Harness 原生接受图片输入：当前请求的图片 attachment 经 DSH `attachments` 服务解析为宿主文件后，Claude 走 `--input-format stream-json` 的 base64 image block，Codex 走 `localImage` input item，Kimi/Devin 走 ACP `image` content block（未声明图片能力的 ACP agent 退化为宿主路径引用）；历史图片及嵌套 tool-result 图片只保留稳定的省略占位符，不会伪装成已理解视觉内容。
 - 文件附件走宿主路径引用：当前请求的 file attachment 经 `attachments.fileHostPath` 解析为宿主绝对路径后以文本形式写进 prompt，外部 Harness 用自己的文件工具按需读取；无法解析为宿主路径的 ref 在 dispatch 前硬拒绝，历史文件同样只保留省略占位符。
 - Devin 模型选择：插件把 Devin 账号的模型目录注册为 DSH provider `devin`（来自 `devin models list --format json`，未登录时退化为帮助文档列出的 family），模型选择器里选中 `devin/<model>` 后由 Devin adapter 翻译成 `devin acp --model`；该 provider 不接受真实 LLM 请求，被其它 Harness 使用会得到明确报错。
+- CLI 自有配置模式：模型选择器里还会出现 `Claude Code（CLI 配置）` 和 `Codex（CLI 配置）` provider，条目是各 CLI 当前配置的模型（读 `~/.claude/settings.json` / `~/.codex/config.toml`，CCSwitch 等工具写入的配置）。选中后对应 adapter 完全跳过 DSH bridge 和托管 config 目录，子进程用自己的 endpoint/凭据/模型跑；被不匹配的 Harness 使用会得到明确报错。Kimi 的 `KIMI_CODE_HOME` 已由插件托管，不提供此模式。
 
 ## 目录结构
 

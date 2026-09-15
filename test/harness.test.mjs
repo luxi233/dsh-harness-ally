@@ -636,3 +636,24 @@ test('availability reflects executable resolution', async () => {
   assert.deepEqual(await f.gateway.availability(), { 'claude-code': false, codex: true, 'kimi-code': true, devin: true })
   assert.deepEqual(f.resolves.sort(), ['claude', 'codex', 'devin', 'kimi'])
 })
+
+test('Claude own-config provider skips the bridge, --model, and managed home', async () => {
+  const f = fixture({
+    bridge: { claudeBaseUrl: 'http://x/claude', token: 't', usage: () => undefined, close() {} },
+    nativeSessions: { async start(parts, starter) { return starter({ prompt: 'task', mode: 'new' }) } },
+    stateDir: '/state',
+    stdout: [JSON.stringify({ type: 'result', subtype: 'success', result: 'OK' })],
+  })
+
+  const run = await f.gateway.start('claude-code', {
+    ...request('task'), provider: 'claude-code', model: 'cli-config', nativeSession: { adopt() {} },
+  })
+  const result = await run.result
+
+  const argv = f.spawns[0].spec.argv
+  assert.equal(f.bridgeOpens.length, 0)
+  assert.equal(argv.includes('--bare'), false)
+  assert.equal(argv.includes('--model'), false)
+  assert.equal(f.spawns[0].spec.env.CLAUDE_CONFIG_DIR, undefined)
+  assert.equal(result.output[0].text, 'OK')
+})

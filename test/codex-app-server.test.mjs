@@ -328,3 +328,18 @@ test('Codex app-server fails closed when a file attachment has no host path', as
   await assert.rejects(startCodexAppServerRun(f.deps, f.request), /无法解析文件附件/)
   assert.equal(f.spawns.length, 0)
 })
+
+test('Codex own-config provider skips the bridge and model overrides', async () => {
+  const f = fixture()
+  const run = await startCodexAppServerRun(f.deps, { ...f.request, provider: 'codex', model: 'gpt-5.5' })
+  await f.terminalGate
+  f.spawns[0].handle.send({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } } })
+  const result = await run.result
+
+  assert.equal(result.stopReason, 'completed')
+  assert.equal(f.bridgeOpens.length, 0)
+  const argv = f.spawns[0].spec.argv.join(' ')
+  assert.equal(argv.includes('model_provider'), false)
+  assert.equal(f.requests[1].params.model, undefined)
+  assert.equal(f.requests[1].params.modelProvider, undefined)
+})
