@@ -483,3 +483,28 @@ test('Devin ACP does not forward non-devin provider model selections', async () 
   assert.equal(result.stopReason, 'completed')
   assert.equal(f.spawns[0].spec.argv.includes('--model'), false)
 })
+
+test('Devin ACP surfaces the attachment-resolution diagnostic instead of a generic phase error', async () => {
+  const f = fixture({
+    attachments: { imageHostPath: () => undefined },
+  })
+  f.request.images = [{ attachment: { attachmentId: 'img-gone', mediaType: 'image/png' } }]
+  const run = await startDevinAcpRun(f.deps, f.request)
+  const eventPromise = collect(run.stream)
+  const [, result] = await Promise.all([eventPromise, run.result])
+  await run.dispose()
+
+  assert.equal(result.stopReason, 'error')
+  assert.match(result.diagnostic ?? '', /无法解析图片附件/)
+  // 附件解析失败发生在 session/prompt 之前——不会发出半截请求
+  assert.equal(f.messages.some((message) => message.method === 'session/prompt'), false)
+})
+
+test('Devin ACP fails closed before spawn when a file attachment cannot be resolved', async () => {
+  const f = fixture({
+    attachments: { fileHostPath: () => undefined },
+  })
+  f.request.files = [{ attachment: { attachmentId: 'file-gone', name: 'a.pdf' } }]
+  await assert.rejects(startDevinAcpRun(f.deps, f.request), /无法解析文件附件/)
+  assert.equal(f.spawns.length, 0)
+})

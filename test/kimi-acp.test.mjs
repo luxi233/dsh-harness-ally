@@ -951,3 +951,17 @@ test('Kimi resumes a durable ACP session and sends images on the resumed turn', 
   assert.match(prompt.at(-1).text, /^USER\nlook at this image/)
   assert.deepEqual(adopted, ['session-kimi-old'])
 })
+
+test('Kimi ACP surfaces the attachment-resolution diagnostic instead of a generic phase error', async () => {
+  const f = fixture({
+    attachments: { imageHostPath: () => undefined },
+  })
+  f.request.images = [{ attachment: { attachmentId: 'img-gone', mediaType: 'image/png' } }]
+  const run = await startKimiAcpRun(f.deps, f.request)
+  const result = await run.result
+  await run.dispose()
+
+  assert.equal(result.stopReason, 'error')
+  assert.match(result.diagnostic ?? '', /无法解析图片附件/)
+  assert.equal(f.messages.some((message) => message.method === 'session/prompt'), false)
+})

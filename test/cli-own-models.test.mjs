@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { PassThrough } from 'node:stream'
 import test from 'node:test'
 
 import { claudeConfiguredModel, codexConfiguredModel, ownConfigAdapters } from '../lib/cli-own-models.js'
@@ -62,4 +63,103 @@ test('own-config adapters list the configured model and refuse llm calls', async
     for await (const chunk of codex.stream({})) void chunk
   }, /Harness 切换/)
   assert.deepEqual(await claude.resolveModel('claude-code', 'x'), { provider: 'claude-code', id: 'x', name: 'x' })
+})
+
+test('own-config adapters expose the llm adapter contract hooks', () => {
+  for (const adapter of ownConfigAdapters()) {
+    // registerAdapter 在 prepareRoutes 阶段调用 providerRetryPolicy,token meter
+    // 调用 imageRequestPricing——缺一个都会让注册静默失败。
+    assert.equal(adapter.providerRetryPolicy('x'), undefined)
+    assert.equal(adapter.imageRequestPricing('x', 'y'), undefined)
+    assert.equal(typeof adapter.providerInfo, 'function')
+    assert.equal(typeof adapter.prepareCall, 'function')
+  }
+})
+
+test('claude own-config list merges the configured model ahead of aliases', async () => {
+  const dir = tempHome()
+  writeFileSync(join(dir, 'settings.json'), JSON.stringify({ model: 'claude-custom-1' }))
+  const prev = process.env.CLAUDE_CONFIG_DIR
+  process.env.CLAUDE_CONFIG_DIR = dir
+  try {
+    const [claude] = ownConfigAdapters()
+    const models = await claude.listModels('claude-code')
+    assert.deepEqual(models.map((model) => model.id), ['cli-config', 'claude-custom-1', 'sonnet', 'opus', 'haiku'])
+    assert.match(models[1].description ?? '', /settings\.json/)
+  } finally {
+    if (prev === undefined) delete process.env.CLAUDE_CONFIG_DIR
+    else process.env.CLAUDE_CONFIG_DIR = prev
+  }
+})
+
+// 模拟 codex app-server:JSON-RPC initialize → initialized → model/list
+function codexCatalogDeps(rows, { fail } = {}) {
+  const writes = []
+  const stdout = new PassThrough()
+  const child = {
+    stdin: {
+      write(text) {
+        writes.push(text)
+        const message = JSON.parse(text.trim())
+        queueMicrotask(() => {
+          if (message.method === 'initialize') {
+            stdout.write(`${JSON.stringify({ id: message.id, result: { userAgent: 'codex/1' } })}\n`)
+          } else if (message.method === 'model/list') {
+            if (fail) stdout.write(`${JSON.stringify({ id: message.id, error: { code: -32000, message: 'no auth' } })}\n`)
+            else stdout.write(`${JSON.stringify({ id: message.id, result: { data: rows } })}\n`)
+          }
+        })
+        return true
+      },
+    },
+    stdout,
+    terminate() {},
+    done: new Promise(() => {}),
+  }
+  return {
+    writes,
+    deps: {
+      subprocess: { async resolveExecutable() { return '/bin/codex' }, spawn() { return child } },
+    },
+  }
+}
+
+test('codex own-config lists the account catalog from model/list with reasoning metadata', async () => {
+  const { deps, writes } = codexCatalogDeps([
+    { id: 'gpt-6-astra', displayName: 'GPT-6 Astra', description: 'frontier', supportedReasoningEfforts: [{ reasoningEffort: 'low' }, { reasoningEffort: 'high' }], defaultReasoningEffort: 'high', inputModalities: ['text', 'image'] },
+    { id: 'gpt-5.5', displayName: 'GPT-5.5' },
+    { id: '' },
+    'not-an-object',
+  ])
+  const [claude, codex] = ownConfigAdapters(deps)
+  assert.equal(claude.providerId, 'claude-code')
+
+  const models = await codex.listModels('codex')
+  assert.deepEqual(models.map((model) => model.id), ['gpt-6-astra', 'gpt-5.5'])
+  assert.equal(models[0].name, 'GPT-6 Astra')
+  assert.equal(models[0].description, 'frontier')
+  assert.deepEqual(models[0].inputModalities, ['text', 'image'])
+  assert.ok(writes.some((line) => line.includes('"model/list"')))
+  assert.ok(writes.some((line) => line.includes('"initialized"')))
+
+  const resolved = await codex.resolveModel('codex', 'gpt-6-astra')
+  assert.equal(resolved.name, 'GPT-6 Astra')
+  assert.deepEqual(resolved.reasoning.efforts.map((effort) => effort.id), ['low', 'high'])
+  assert.equal(resolved.reasoning.defaultEffort, 'high')
+})
+
+test('codex own-config falls back to the configured model when model/list fails', async () => {
+  const dir = tempHome()
+  writeFileSync(join(dir, 'config.toml'), 'model = "gpt-5.5"\n')
+  const { deps } = codexCatalogDeps([], { fail: true })
+  const [, codex] = ownConfigAdapters(deps)
+  const prev = process.env.CODEX_HOME
+  process.env.CODEX_HOME = dir
+  try {
+    const models = await codex.listModels('codex')
+    assert.deepEqual(models.map((model) => model.id), ['gpt-5.5', 'cli-config'])
+  } finally {
+    if (prev === undefined) delete process.env.CODEX_HOME
+    else process.env.CODEX_HOME = prev
+  }
 })

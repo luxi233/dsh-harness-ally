@@ -81,6 +81,7 @@ function fixture(events = {}) {
     stateDir: events.stateDir,
     attachments: events.attachments,
     readFile: events.readFile,
+    makeDirectory: events.makeDirectory,
   })
   return { gateway, spawns, resolves, confined, bridgeOpens }
 }
@@ -654,6 +655,52 @@ test('Claude own-config provider skips the bridge, --model, and managed home', a
   assert.equal(f.bridgeOpens.length, 0)
   assert.equal(argv.includes('--bare'), false)
   assert.equal(argv.includes('--model'), false)
+  assert.equal(f.spawns[0].spec.env.CLAUDE_CONFIG_DIR, undefined)
+  assert.equal(result.output[0].text, 'OK')
+})
+
+test('Claude drops --bare and retries when the CLI reports it as an unknown option', async () => {
+  const f = fixture({
+    bridge: { claudeBaseUrl: 'http://x/claude', token: 't', usage: () => undefined, close() {} },
+    nativeSessions: { async start(parts, starter) { return starter({ prompt: 'task', mode: 'new' }) } },
+    stateDir: '/state',
+    makeDirectory: async () => {},
+    spawnEvents: [
+      { stderr: ["error: unknown option '--bare'\n"], outcome: { exitCode: 1, signal: null } },
+      { stdout: [JSON.stringify({ type: 'result', subtype: 'success', result: 'OK' })] },
+    ],
+  })
+
+  const run = await f.gateway.start('claude-code', {
+    ...request('task'), provider: 'minimax-cn', model: 'MiniMax-M3', nativeSession: { adopt() {} },
+  })
+  const result = await run.result
+
+  assert.equal(result.stopReason, 'completed')
+  assert.equal(result.output[0].text, 'OK')
+  assert.equal(f.spawns.length, 2)
+  assert.equal(f.spawns[0].spec.argv.includes('--bare'), true)
+  assert.equal(f.spawns[1].spec.argv.includes('--bare'), false)
+  assert.equal(f.spawns[1].spec.argv.includes('--settings'), true)
+})
+
+test('Claude own-config provider forwards a concrete model alias via --model', async () => {
+  const f = fixture({
+    bridge: { claudeBaseUrl: 'http://x/claude', token: 't', usage: () => undefined, close() {} },
+    nativeSessions: { async start(parts, starter) { return starter({ prompt: 'task', mode: 'new' }) } },
+    stateDir: '/state',
+    stdout: [JSON.stringify({ type: 'result', subtype: 'success', result: 'OK' })],
+  })
+
+  const run = await f.gateway.start('claude-code', {
+    ...request('task'), provider: 'claude-code', model: 'opus', nativeSession: { adopt() {} },
+  })
+  const result = await run.result
+
+  const argv = f.spawns[0].spec.argv
+  assert.equal(f.bridgeOpens.length, 0)
+  assert.equal(argv.includes('--bare'), false)
+  assert.deepEqual(argv.slice(argv.indexOf('--model'), argv.indexOf('--model') + 2), ['--model', 'opus'])
   assert.equal(f.spawns[0].spec.env.CLAUDE_CONFIG_DIR, undefined)
   assert.equal(result.output[0].text, 'OK')
 })

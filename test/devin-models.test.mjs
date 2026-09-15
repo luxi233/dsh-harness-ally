@@ -90,3 +90,13 @@ test('prepareCall binds the resolved model and a stream entry', async () => {
     for await (const chunk of call.stream({})) void chunk
   }, /Devin Harness/)
 })
+
+test('devin provider adapter exposes the registration contract hooks', () => {
+  const { adapter } = fixture()
+  // registerAdapter 的 prepareRoutes 调 providerRetryPolicy,token meter 调
+  // imageRequestPricing——缺一个都会让注册静默失败。
+  assert.equal(adapter.providerRetryPolicy('devin'), undefined)
+  assert.equal(adapter.imageRequestPricing('devin', 'claude-sonnet-4'), undefined)
+  assert.equal(typeof adapter.providerInfo, 'function')
+  assert.equal(typeof adapter.resolveModel, 'function')
+})
