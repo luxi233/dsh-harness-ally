@@ -108,26 +108,51 @@ test('requestFileInputs prefers request.files over prompt blocks', () => {
   assert.deepEqual(requestFileInputs(viaPrompt), [{ attachment: { attachmentId: 'y' } }])
 })
 
-test('resolveFileInputs maps refs to host paths without reading bytes', () => {
-  const deps = { attachments: { fileHostPath: (ref) => `/host/${ref.attachmentId}` } }
-  const resolved = resolveFileInputs(deps, [
-    { attachment: { attachmentId: 'f1', name: 'a.pdf' } },
-    { attachment: { attachmentId: 'f2' } },
+test('resolveFileInputs maps refs to host paths and inlines small text files', async () => {
+  const deps = {
+    attachments: { fileHostPath: (ref) => `/host/${ref.attachmentId}` },
+    readFile: async (path) => path === '/host/f1' ? Buffer.from('SECRET_WORD') : Buffer.from([0, 1, 2, 255]),
+  }
+  const resolved = await resolveFileInputs(deps, [
+    { attachment: { attachmentId: 'f1', name: 'a.txt', bytes: 11 } },
+    { attachment: { attachmentId: 'f2', name: 'a.bin', bytes: 4 } },
+    { attachment: { attachmentId: 'f3' } },
   ])
   assert.deepEqual(resolved, [
-    { path: '/host/f1', name: 'a.pdf' },
-    { path: '/host/f2', name: undefined },
+    { path: '/host/f1', name: 'a.txt', content: 'SECRET_WORD' },
+    { path: '/host/f2', name: 'a.bin' },
+    { path: '/host/f3', name: undefined },
   ])
 })
 
-test('resolveFileInputs fails closed without a host path', () => {
-  assert.throws(() => resolveFileInputs({}, [{ attachment: { attachmentId: 'x' } }]), /无法解析文件附件/)
-  const deps = { attachments: { fileHostPath: () => undefined } }
-  assert.throws(() => resolveFileInputs(deps, [{ attachment: { attachmentId: 'x' } }]), /无法解析文件附件/)
+test('resolveFileInputs keeps path-only when the read fails or the file is too large', async () => {
+  const deps = {
+    attachments: { fileHostPath: (ref) => `/host/${ref.attachmentId}` },
+    readFile: async () => { throw new Error('EACCES') },
+  }
+  const resolved = await resolveFileInputs(deps, [
+    { attachment: { attachmentId: 'f1', bytes: 10 } },
+    { attachment: { attachmentId: 'big', bytes: 128 * 1024 } },
+  ])
+  assert.deepEqual(resolved, [
+    { path: '/host/f1', name: undefined },
+    { path: '/host/big', name: undefined },
+  ])
 })
 
-test('filePathFallback appends host paths to the prompt', () => {
-  const text = filePathFallback('read this', [{ path: '/host/a.pdf', name: 'a.pdf' }])
+test('resolveFileInputs fails closed without a host path', async () => {
+  await assert.rejects(() => resolveFileInputs({}, [{ attachment: { attachmentId: 'x' } }]), /无法解析文件附件/)
+  const deps = { attachments: { fileHostPath: () => undefined } }
+  await assert.rejects(() => resolveFileInputs(deps, [{ attachment: { attachmentId: 'x' } }]), /无法解析文件附件/)
+})
+
+test('filePathFallback inlines content and falls back to paths for binary files', () => {
+  const text = filePathFallback('read this', [
+    { path: '/host/a.txt', name: 'a.txt', content: 'SECRET_WORD' },
+    { path: '/host/b.bin', name: 'b.bin' },
+  ])
   assert.match(text, /^read this/)
-  assert.match(text, /- \/host\/a\.pdf/)
+  assert.match(text, /--- a\.txt \(\/host\/a\.txt\) ---\nSECRET_WORD\n--- end of a\.txt ---/)
+  assert.match(text, /file-read tool/)
+  assert.match(text, /\/host\/b\.bin/)
 })

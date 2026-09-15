@@ -304,11 +304,15 @@ test('Codex app-server forwards inline image data as a data-URL image item', asy
   ])
 })
 
-test('Codex app-server forwards attached files as host path references in the prompt text', async () => {
+test('Codex app-server inlines small text attachments and references large ones by path', async () => {
   const f = fixture({
-    attachments: { fileHostPath: (ref) => ref?.attachmentId === 'file-1' ? '/host/report.pdf' : undefined },
+    attachments: { fileHostPath: (ref) => `/host/${ref?.attachmentId}` },
+    readFile: async () => Buffer.from('FILE_SECRET'),
   })
-  f.request.files = [{ attachment: { attachmentId: 'file-1', name: 'report.pdf' } }]
+  f.request.files = [
+    { attachment: { attachmentId: 'note.txt', name: 'note.txt', bytes: 11 } },
+    { attachment: { attachmentId: 'report.pdf', name: 'report.pdf', bytes: 5 * 1024 * 1024 } },
+  ]
   const run = await startCodexAppServerRun(f.deps, f.request)
   await f.terminalGate
   f.spawns[0].handle.send({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } } })
@@ -318,7 +322,8 @@ test('Codex app-server forwards attached files as host path references in the pr
   const input = f.requests[2].params.input
   const text = input.at(-1).text
   assert.match(text, /do work/)
-  assert.match(text, /- \/host\/report\.pdf/)
+  assert.match(text, /--- note\.txt \(\/host\/note\.txt\) ---\nFILE_SECRET\n--- end of note\.txt ---/)
+  assert.match(text, /\/host\/report\.pdf/)
 })
 
 test('Codex app-server fails closed when a file attachment has no host path', async () => {
