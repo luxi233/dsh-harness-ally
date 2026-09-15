@@ -45,20 +45,18 @@ test('own-config adapters list the configured model and refuse llm calls', async
   process.env.CODEX_HOME = dir
   try {
     const models = await codex.listModels('codex')
-    assert.deepEqual(models, [{
-      provider: 'codex',
-      id: 'gpt-5.5',
-      name: 'gpt-5.5',
-      description: '使用 Codex 自己的配置与凭据执行，不经过 DSH 模型 bridge',
-    }])
+    // 无 deps 时 codex 目录回退:配置模型 + 「跟随配置」占位
+    assert.deepEqual(models.map((model) => model.id), ['gpt-5.5', 'cli-config'])
+    assert.equal(models.every((model) => model.provider === 'codex'), true)
   } finally {
     if (prev === undefined) delete process.env.CODEX_HOME
     else process.env.CODEX_HOME = prev
   }
 
   const listed = await claude.listModels('claude-code')
-  assert.equal(listed.length, 1)
-  assert.equal(listed[0].provider, 'claude-code')
+  // Claude:占位条目 + family alias(sonnet/opus/haiku)
+  assert.deepEqual(listed.map((model) => model.id), ['cli-config', 'sonnet', 'opus', 'haiku'])
+  assert.equal(listed.every((model) => model.provider === 'claude-code'), true)
 
   await assert.rejects(async () => {
     for await (const chunk of codex.stream({})) void chunk
