@@ -128,6 +128,7 @@ function fixture({
         },
         get terminated() { return terminated },
         send,
+        forceDone() { resolveDone({ exitCode: 0, signal: null }) },
         complete() {
           if (promptRequest) send({ id: promptRequest.id, result: { stopReason: 'end_turn' } })
         },
@@ -213,6 +214,23 @@ test('Devin ACP authenticates, picks a permissive mode, and streams text/thought
   assert.deepEqual(approval.result.outcome, { outcome: 'selected', optionId: 'approve_once' })
   const question = f.messages.find((message) => message.id === 100)
   assert.deepEqual(question.result.outcome, { outcome: 'cancelled' })
+})
+
+test('late stdout after child done still settles the pending turn', async () => {
+  const f = fixture()
+  const run = await startDevinAcpRun(f.deps, f.request)
+  const eventPromise = collect(run.stream)
+  await f.terminalGate
+
+  // 托管 runner 可能先报告进程退出、后送达最后一段 stdout;响应迟到时不能误判提前退出。
+  f.spawns[0].handle.forceDone()
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  f.spawns[0].handle.complete()
+  const [, result] = await Promise.all([eventPromise, run.result])
+  await run.dispose()
+
+  assert.equal(result.stopReason, 'completed')
+  assert.deepEqual(result.output, [{ type: 'text', text: 'Hello' }])
 })
 
 test('Devin API key falls back to devin auth login credentials.toml', async () => {
