@@ -462,6 +462,45 @@ test('external prompts keep the Harness instruction, system, and prior history a
   assert.equal(secondRequest.conversation.resumeFrom(watermark), 'USER\nsecond')
 })
 
+test('watermark survives an image turn so the next request can resume natively', async () => {
+  const { runtime, session, starts } = fixture({ harness: 'devin' })
+  session.append('turn/start', { turn: 1 })
+  session.append('step/start', { turn: 1, step: 1 })
+
+  await collect(runtime.route({
+    sessionId: session.id,
+    agentLoop: true,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image', attachment: { attachmentId: 'img-1', mediaType: 'image/png', name: 'red.png' } },
+        { type: 'text', text: 'what color' },
+      ],
+    }],
+  }, fallback().next))
+
+  session.append('turn/start', { turn: 2 })
+  session.append('step/start', { turn: 2, step: 1 })
+  await collect(runtime.route({
+    sessionId: session.id,
+    agentLoop: true,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'image', attachment: { attachmentId: 'img-1', mediaType: 'image/png', name: 'red.png' } },
+          { type: 'text', text: 'what color' },
+        ],
+      },
+      { role: 'assistant', source: { kind: 'model' }, content: [{ type: 'text', text: 'Red' }] },
+      { role: 'user', content: [{ type: 'text', text: 'and now?' }] },
+    ],
+  }, fallback().next))
+
+  const watermark = starts[0].request.conversation.watermarkAfter('Red')
+  assert.equal(starts[1].request.conversation.resumeFrom(watermark), 'USER\nand now?')
+})
+
 test('external Harness emits one standard usage sample even when the provider omits metrics', async () => {
   const { runtime, session } = fixture({ harness: 'codex' })
   session.append('turn/start', { turn: 1 })
@@ -959,8 +998,7 @@ test('external Harness keeps image markers in canonical text and degrades histor
   assert.equal(starts.length, 1)
   assert.deepEqual(starts[0].request.images, [{ attachment }, { attachment: secondAttachment }])
   const rendered = starts[0].request.prompt[0].text
-  assert.match(rendered, /\[image omitted from external Harness history\]/)
-  assert.equal((rendered.match(/\[image attached\]/g) ?? []).length, 2)
+  assert.equal((rendered.match(/\[image attached\]/g) ?? []).length, 3)
 })
 
 test('external Harness accepts an image-only request with a fallback text block', async () => {
@@ -997,8 +1035,7 @@ test('external Harness forwards current request file refs and marks canonical te
   assert.equal(starts.length, 1)
   assert.deepEqual(starts[0].request.files, [{ attachment }])
   const rendered = starts[0].request.prompt[0].text
-  assert.match(rendered, /\[file omitted from external Harness history\]/)
-  assert.match(rendered, /\[file attached: report\.pdf\]/)
+  assert.match(rendered, /\[file attached\][\s\S]*\[file attached: report\.pdf\]/)
 })
 
 test('external Harness still rejects malformed file blocks', async () => {
