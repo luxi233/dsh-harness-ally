@@ -1,15 +1,42 @@
 import assert from 'node:assert/strict'
+import { EventEmitter } from 'node:events'
 import test from 'node:test'
 
 import { createDevinModelAdapter, DEVIN_PROVIDER } from '../lib/devin-models.js'
 
-function fixture({ modelsJson, exitCode = 0, spawnError } = {}) {
+function fixture({ modelsJson, exitCode = 0, spawnError, acpCatalog, env } = {}) {
   const spawns = []
   const subprocess = {
     async resolveExecutable(command) { return `/bin/${command}` },
     spawn(spec) {
       if (spawnError) throw spawnError
       spawns.push(spec)
+      if (spec.argv.includes('acp')) {
+        // 伪 ACP server:按收到的 request id 回 initialize/authenticate/session/new。
+        const child = {
+          stdin: { write(text) {
+            for (const line of text.split('\n').filter(Boolean)) {
+              const message = JSON.parse(line)
+              if (message.method === 'initialize') {
+                child.stdout.emit('data', Buffer.from(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: 1 } }) + '\n'))
+              } else if (message.method === 'authenticate') {
+                child.stdout.emit('data', Buffer.from(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: {} }) + '\n'))
+              } else if (message.method === 'session/new') {
+                const configOptions = acpCatalog
+                  ? [{ id: 'model', category: 'model', type: 'select', options: acpCatalog }]
+                  : []
+                child.stdout.emit('data', Buffer.from(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { sessionId: 's1', configOptions } }) + '\n'))
+              }
+            }
+          }, on() {}, end() {} },
+          stdout: new EventEmitter(),
+          stderr: new EventEmitter(),
+          done: new Promise(() => {}),
+          terminate() {},
+          waitForExit: async () => true,
+        }
+        return child
+      }
       return {
         done: Promise.resolve({ exitCode }),
         collected: { stdout: { readFrom: () => ({ text: modelsJson ?? '', nextOffset: 0, lossy: false }) } },
@@ -18,7 +45,7 @@ function fixture({ modelsJson, exitCode = 0, spawnError } = {}) {
     },
   }
   const cliManager = { async resolve(harness) { assert.equal(harness, DEVIN_PROVIDER); return '/bin/devin' } }
-  const adapter = createDevinModelAdapter({ subprocess, cliManager })
+  const adapter = createDevinModelAdapter({ subprocess, cliManager, env: env ?? {}, readTextFile: () => { throw new Error('no credentials') } })
   return { adapter, spawns }
 }
 
@@ -60,6 +87,24 @@ test('devin provider falls back when models list exits non-zero or returns unpar
     const models = await f.adapter.listModels(DEVIN_PROVIDER)
     assert.equal(models.length > 0, true)
   }
+})
+
+test('devin provider discovers the account catalog via ACP session configOptions when models list fails', async () => {
+  const acpCatalog = [
+    { value: 'swe-2-high', name: 'SWE-2 High' },
+    { value: 'claude-opus-5-medium', name: 'Claude Opus 5 Medium' },
+    { value: 'claude-opus-5-medium', name: 'Duplicate' },
+  ]
+  const { adapter, spawns } = fixture({ modelsJson: '', exitCode: 1, acpCatalog })
+
+  const models = await adapter.listModels(DEVIN_PROVIDER)
+
+  assert.equal(spawns.length, 2)
+  assert.deepEqual(spawns[1].argv.slice(1), ['acp'])
+  assert.deepEqual(models, [
+    { provider: 'devin', id: 'swe-2-high', name: 'SWE-2 High' },
+    { provider: 'devin', id: 'claude-opus-5-medium', name: 'Claude Opus 5 Medium' },
+  ])
 })
 
 test('devin provider resolveModel returns catalog entries or a minimal identity', async () => {
