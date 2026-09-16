@@ -1012,3 +1012,42 @@ test('external Harness still rejects malformed file blocks', async () => {
   }, fallback().next)), /不支持文件输入/)
   assert.equal(starts.length, 0)
 })
+
+test('own-config provider under a mismatched Harness fails before dispatch', async () => {
+  for (const [provider, harness, label] of [
+    ['devin', 'kimi-code', 'Devin'],
+    ['kimi-code', 'claude-code', 'Kimi Code'],
+    ['claude-code', 'codex', 'Claude Code'],
+    ['codex', 'devin', 'Codex'],
+  ]) {
+    const { runtime, session, starts } = fixture({ harness })
+    session.append('turn/start', { turn: 1 })
+    session.append('step/start', { turn: 1, step: 1 })
+
+    const chunks = await collect(runtime.route({
+      sessionId: session.id, agentLoop: true, provider, model: 'm',
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+    }, fallback().next))
+
+    assert.equal(starts.length, 0)
+    const finish = chunks.at(-1)
+    assert.equal(finish.type, 'finish')
+    assert.equal(finish.reason.kind, 'error')
+    assert.equal(finish.reason.failure.code, 'ALLY_HARNESS_MISMATCH')
+    assert.match(finish.reason.failure.message, new RegExp(`切换到 ${label}`))
+  }
+})
+
+test('own-config provider dispatches under its matching Harness', async () => {
+  const { runtime, session, starts } = fixture({ harness: 'kimi-code' })
+  session.append('turn/start', { turn: 1 })
+  session.append('step/start', { turn: 1, step: 1 })
+
+  await collect(runtime.route({
+    sessionId: session.id, agentLoop: true, provider: 'kimi-code', model: 'kimi-code/k3',
+    messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+  }, fallback().next))
+
+  assert.equal(starts.length, 1)
+  assert.equal(starts[0].request.provider, 'kimi-code')
+})
