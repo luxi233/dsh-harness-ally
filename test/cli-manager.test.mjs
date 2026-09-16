@@ -10,6 +10,7 @@ function fixture({ globals = {}, installOk = true } = {}) {
   const managed = new Set()
   const spawns = []
   const resolves = []
+  const downloads = []
   const binName = (name) => process.platform === 'win32' ? `${name}.cmd` : name
   const managedPath = (harness, name) => join(managedRoot, harness, 'node_modules', '.bin', binName(name))
   const devinUserBin = process.platform === 'win32'
@@ -19,7 +20,7 @@ function fixture({ globals = {}, installOk = true } = {}) {
     async resolveExecutable(command) {
       resolves.push(command)
       if (command === 'npm') return '/usr/bin/npm'
-      if (command === 'sh' || command === 'powershell') return `/bin/${command}`
+      if (command === 'sh' || command === 'bash' || command === 'powershell') return `/bin/${command}`
       if (globals[command]) return globals[command]
       if (managed.has(command)) return command
       throw new Error(`missing ${command}`)
@@ -34,7 +35,7 @@ function fixture({ globals = {}, installOk = true } = {}) {
           if (packageName.startsWith('@anthropic-ai/claude-code@')) managed.add(managedPath('claude-code', 'claude'))
           if (packageName.startsWith('@openai/codex@')) managed.add(managedPath('codex', 'codex'))
           if (packageName.startsWith('@moonshot-ai/kimi-code@')) managed.add(managedPath('kimi-code', 'kimi'))
-          if (spec.argv.some((arg) => typeof arg === 'string' && arg.includes('cli.devin.ai'))) managed.add(devinUserBin)
+          if (spec.argv.some((arg) => typeof arg === 'string' && arg.includes('dsh-ally-devin-setup'))) managed.add(devinUserBin)
         }
         settle({ exitCode: installOk ? 0 : 1, signal: null })
       })
@@ -50,8 +51,14 @@ function fixture({ globals = {}, installOk = true } = {}) {
       }
     },
   }
-  const manager = createCliManager({ subprocess, managedRoot, mkdir: async () => {}, rm: async () => {} })
-  return { manager, managedRoot, managedPath, managed, spawns, resolves, devinUserBin }
+  const manager = createCliManager({
+    subprocess,
+    managedRoot,
+    mkdir: async () => {},
+    rm: async () => {},
+    download: async (url, dest) => { downloads.push([url, dest]) },
+  })
+  return { manager, managedRoot, managedPath, managed, spawns, resolves, downloads, devinUserBin }
 }
 
 test('CLI status detects global first, then DSH-managed, then missing', async () => {
@@ -114,7 +121,9 @@ test('Devin installs through the official script and resolves from the user inst
 
   assert.deepEqual(installed, { available: true, source: 'global', installing: false })
   assert.equal(f.spawns.length, 1)
-  assert.equal(f.spawns[0].argv.some((arg) => typeof arg === 'string' && arg.includes('cli.devin.ai')), true)
+  assert.deepEqual(f.downloads.length, 1)
+  assert.equal(f.downloads[0][0], process.platform === 'win32' ? 'https://static.devin.ai/cli/setup.ps1' : 'https://cli.devin.ai/install.sh')
+  assert.equal(f.spawns[0].argv.at(-1), f.downloads[0][1])
   assert.equal(await f.manager.resolve('devin'), f.devinUserBin)
 })
 

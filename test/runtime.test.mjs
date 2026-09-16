@@ -1050,29 +1050,45 @@ test('external Harness still rejects malformed file blocks', async () => {
   assert.equal(starts.length, 0)
 })
 
-test('own-config provider under a mismatched Harness fails before dispatch', async () => {
-  for (const [provider, harness, label] of [
-    ['devin', 'kimi-code', 'Devin'],
-    ['kimi-code', 'claude-code', 'Kimi Code'],
-    ['claude-code', 'codex', 'Claude Code'],
-    ['codex', 'devin', 'Codex'],
+test('own-config provider auto-switches to its bound Harness before dispatch', async () => {
+  for (const [provider, harness, required] of [
+    ['devin', 'kimi-code', 'devin'],
+    ['kimi-code', 'claude-code', 'kimi-code'],
+    ['claude-code', 'codex', 'claude-code'],
+    ['codex', 'devin', 'codex'],
   ]) {
     const { runtime, session, starts } = fixture({ harness })
     session.append('turn/start', { turn: 1 })
     session.append('step/start', { turn: 1, step: 1 })
 
-    const chunks = await collect(runtime.route({
+    await collect(runtime.route({
       sessionId: session.id, agentLoop: true, provider, model: 'm',
       messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
     }, fallback().next))
 
-    assert.equal(starts.length, 0)
-    const finish = chunks.at(-1)
-    assert.equal(finish.type, 'finish')
-    assert.equal(finish.reason.kind, 'error')
-    assert.equal(finish.reason.failure.code, 'ALLY_HARNESS_MISMATCH')
-    assert.match(finish.reason.failure.message, new RegExp(`切换到 ${label}`))
+    assert.equal(starts.length, 1)
+    assert.equal(starts[0].selected, required)
+    assert.equal(starts[0].request.provider, provider)
+    assert.equal((await runtime.snapshot(session.id)).harness, required)
   }
+})
+
+test('own-config provider fails before dispatch when the bound Harness CLI is unavailable', async () => {
+  const { runtime, session, starts, gateway } = fixture({ harness: 'codex' })
+  gateway.available = async () => false
+  session.append('turn/start', { turn: 1 })
+  session.append('step/start', { turn: 1, step: 1 })
+
+  const chunks = await collect(runtime.route({
+    sessionId: session.id, agentLoop: true, provider: 'devin', model: 'swe-2',
+    messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+  }, fallback().next))
+
+  assert.equal(starts.length, 0)
+  const finish = chunks.at(-1)
+  assert.equal(finish.type, 'finish')
+  assert.equal(finish.reason.kind, 'error')
+  assert.equal(finish.reason.failure.code, 'ALLY_HARNESS_MISMATCH')
 })
 
 test('own-config provider dispatches under its matching Harness', async () => {
