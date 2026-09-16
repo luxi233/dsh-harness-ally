@@ -13,7 +13,7 @@ async function collect(iterable) {
 function configOptionsFixture(modeAdvertised, ownCatalog) {
   const options = []
   if (modeAdvertised) options.push({
-    type: 'select', id: 'mode', currentValue: 'default', options: [{ value: 'auto', name: 'Auto' }],
+    type: 'select', id: 'mode', currentValue: 'default', options: [{ value: 'auto', name: 'Auto' }, { value: 'yolo', name: 'YOLO' }],
   })
   if (ownCatalog) {
     options.push(
@@ -392,7 +392,7 @@ test('Kimi ACP streams message, thinking, and read-only tool activity through a 
   ])
   assert.match(f.messages[0].params.clientInfo.version, /^0\.12\.1/)
   assert.deepEqual(f.messages[0].params.clientCapabilities.fs, { readTextFile: false, writeTextFile: false })
-  assert.deepEqual(f.messages[2].params, { sessionId: 'session-kimi', configId: 'mode', value: 'auto' })
+  assert.deepEqual(f.messages[2].params, { sessionId: 'session-kimi', configId: 'mode', value: 'yolo' })
   assert.match(f.messages[3].params.prompt[0].text, /^do work\n\nKIMI CODE REPOSITORY SKILL POLICY/)
   assert.match(f.messages[3].params.prompt[0].text, /Do not invoke the native Skill tool/)
   assert.match(f.messages[3].params.prompt[0].text, /End every complete final answer with the exact marker ␞/)
@@ -1006,7 +1006,7 @@ test('Kimi own-config runs without the bridge and sends model/thinking via set_c
   const configs = f.messages
     .filter((message) => message.method === 'session/set_config_option')
     .map((message) => [message.params.configId, message.params.value])
-  assert.deepEqual(configs, [['mode', 'auto'], ['model', 'kimi-code/k3'], ['thinking', 'high']])
+  assert.deepEqual(configs, [['mode', 'yolo'], ['model', 'kimi-code/k3'], ['thinking', 'high']])
 })
 
 test('Kimi own-config with cli-config model keeps the CLI default and unknown efforts are skipped', async () => {
@@ -1023,5 +1023,5 @@ test('Kimi own-config with cli-config model keeps the CLI default and unknown ef
   const configs = f.messages
     .filter((message) => message.method === 'session/set_config_option')
     .map((message) => [message.params.configId, message.params.value])
-  assert.deepEqual(configs, [['mode', 'auto']])
+  assert.deepEqual(configs, [['mode', 'yolo']])
 })
