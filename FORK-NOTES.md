@@ -88,6 +88,10 @@ nothing for you — it only activates when `req.headers.host` is `127.0.0.1` / `
 | `lib/runtime.js` (fork.11) | own-config provider under a mismatched Harness now auto-switches instead of erroring — picking a `devin`/`codex`/etc provider model flips the session's persisted Harness (`gateway.available` check + `state.setHarness`; `select()`/`runMaintenance` can't be used because the agent is mid-turn at dispatch) and dispatches to the bound CLI. `ALLY_HARNESS_MISMATCH` remains only when the switch itself fails. Applies under Harness `dsh` too |
 | `lib/client.js` (fork.12) | `controller.load` effect also depends on `running` — the selector icon re-syncs at dispatch time (right after the server-side auto-switch) instead of only at turn end via `completedTurns` |
 | `package.json` (fork.12) | Bumped the fork version to `0.12.1-fork.12` |
+| `lib/devin-models.js` (fork.13) | Catalog is a union of all three sources (`models list` + ACP configOptions + model_configs bin cache) instead of a cascade — `models list` succeeds in-process but returns only base families, which previously short-circuited the richer sources. Effort/tier variants are no longer collapsed; base slugs with `-<effort>` variants carry `supportedReasoningEfforts`/`defaultReasoningEffort` so the selector shows a reasoning-effort picker |
+| `lib/devin-acp.js` (fork.13) | `request.model` + `request.reasoningEffort` translate to the `<model>-<effort>` slug for `devin acp --model` (skipped when the model already carries a tier suffix) |
+| `lib/index.js` (fork.13) | `GET /ally/model-diag?provider&model` — live in-process `listModels`/`resolveModelInfo` probe for catalog debugging |
+| `package.json` (fork.13) | Bumped the fork version to `0.12.1-fork.13` |
 | `test/cli-manager.test.mjs`, `test/runtime.test.mjs` (fork.11) | Devin install test updated for the download-then-`-File` flow (asserts the downloaded URL and that argv ends with the script path); mismatch test rewritten to assert the auto-switch and dispatch under the bound Harness, plus a failure-path case when `select()` can't run |
 | `package.json` (fork.11) | Bumped the fork version to `0.12.1-fork.11` |
 
