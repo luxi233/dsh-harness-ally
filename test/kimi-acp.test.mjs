@@ -57,6 +57,7 @@ function fixture({
   skillLateMessageOnCancel = false,
   skillLateCompleteOnCancel = false,
   skillTitle = 'Skill',
+  emptyEndTurn = false,
   skillContinuationTimeoutMs,
   sessionFlushTimeoutMs,
   imageCapable = false,
@@ -169,7 +170,9 @@ function fixture({
           } else if (message.method === 'session/prompt') {
             promptRequest = message
             promptCount += 1
-            if ((skillStall || skillEarlyEnd) && promptCount === 1) {
+            if (emptyEndTurn) {
+              queueMicrotask(() => send({ id: message.id, result: { stopReason: 'end_turn' } }))
+            } else if ((skillStall || skillEarlyEnd) && promptCount === 1) {
               queueMicrotask(() => {
                 send({ method: 'session/update', params: { sessionId: promptRequest.params.sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Loading Skill.' } } } })
                 if (nonSkillToolBeforeSkill) {
@@ -1024,4 +1027,14 @@ test('Kimi own-config with cli-config model keeps the CLI default and unknown ef
     .filter((message) => message.method === 'session/set_config_option')
     .map((message) => [message.params.configId, message.params.value])
   assert.deepEqual(configs, [['mode', 'yolo']])
+})
+
+test('empty end_turn without output or activity is reported as an error', async () => {
+  const f = fixture({ emptyEndTurn: true })
+  const run = await startKimiAcpRun(f.deps, f.request)
+  const result = await run.result
+  await run.dispose()
+
+  assert.equal(result.stopReason, 'error')
+  assert.match(result.diagnostic, /未产生任何输出/)
 })
