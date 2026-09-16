@@ -10,6 +10,27 @@ async function collect(iterable) {
   return values
 }
 
+function configOptionsFixture(modeAdvertised, ownCatalog) {
+  const options = []
+  if (modeAdvertised) options.push({
+    type: 'select', id: 'mode', currentValue: 'default', options: [{ value: 'auto', name: 'Auto' }],
+  })
+  if (ownCatalog) {
+    options.push(
+      { type: 'select', id: 'model', category: 'model', currentValue: 'kimi-code/kimi-for-coding', options: [
+        { value: 'kimi-code/kimi-for-coding', name: 'K2.8' },
+        { value: 'kimi-code/k3', name: 'K3' },
+      ] },
+      { type: 'select', id: 'thinking', category: 'thought_level', currentValue: 'max', options: [
+        { value: 'low', name: 'Thinking Low' },
+        { value: 'high', name: 'Thinking High' },
+        { value: 'max', name: 'Thinking Max' },
+      ] },
+    )
+  }
+  return options
+}
+
 function fixture({
   modeAdvertised = true,
   skillStall = false,
@@ -41,6 +62,9 @@ function fixture({
   imageCapable = false,
   attachments,
   readFile,
+  ownCatalog = false,
+  provider = 'provider',
+  model = 'model',
 } = {}) {
   const messages = []
   const spawns = []
@@ -113,18 +137,14 @@ function fixture({
               }
               send({ id: message.id, result: {
               sessionId: message.params.sessionId,
-              configOptions: modeAdvertised ? [{
-                type: 'select', id: 'mode', currentValue: 'default', options: [{ value: 'auto', name: 'Auto' }],
-              }] : [],
+              configOptions: configOptionsFixture(modeAdvertised, ownCatalog),
             } })
             }
           } else if (message.method === 'session/new') {
             sessionCount += 1
             const response = { id: message.id, result: {
               sessionId: sessionCount === 1 ? 'session-kimi' : 'session-kimi-recovery',
-              configOptions: modeAdvertised ? [{
-                type: 'select', id: 'mode', currentValue: 'default', options: [{ value: 'auto', name: 'Auto' }],
-              }] : [],
+              configOptions: configOptionsFixture(modeAdvertised, ownCatalog),
             } }
             if (sessionCount > 1 && delayRecoverySession) {
               pendingRecoverySession = response
@@ -296,8 +316,8 @@ function fixture({
   const request = {
     parent: { session: { id: 'session-1', header: { cwd: '/workspace', agentPreset: 'harness-ally' } } },
     prompt: [{ type: 'text', text: 'do work' }],
-    provider: 'provider',
-    model: 'model',
+    provider,
+    model,
     reasoningEffort: 'high',
     signal: controller.signal,
     ...(nativeSession ? { nativeSession } : {}),
@@ -964,4 +984,44 @@ test('Kimi ACP surfaces the attachment-resolution diagnostic instead of a generi
   assert.equal(result.stopReason, 'error')
   assert.match(result.diagnostic ?? '', /无法解析图片附件/)
   assert.equal(f.messages.some((message) => message.method === 'session/prompt'), false)
+})
+
+test('Kimi own-config runs without the bridge and sends model/thinking via set_config_option', async () => {
+  const f = fixture({ ownCatalog: true, provider: 'kimi-code', model: 'kimi-code/k3' })
+  const run = await startKimiAcpRun(f.deps, f.request)
+  const eventPromise = collect(run.stream)
+  await f.terminalGate
+  f.spawns[0].handle.complete()
+  const [events, result] = await Promise.all([eventPromise, run.result])
+  await run.dispose()
+
+  assert.equal(result.stopReason, 'completed')
+  assert.equal(events.filter((event) => event.type === 'text-delta').map((event) => event.text).join(''), 'Hello')
+  // own-config:不开 bridge、不注 KIMI_MODEL_* / KIMI_CODE_HOME
+  assert.equal(f.bridgeOpens.length, 0)
+  assert.equal(f.spawns[0].spec.env.KIMI_MODEL_NAME, undefined)
+  assert.equal(f.spawns[0].spec.env.KIMI_MODEL_API_KEY, undefined)
+  assert.equal(f.spawns[0].spec.env.KIMI_CODE_HOME, undefined)
+  // mode auto + model + thinking 都经 set_config_option 下发
+  const configs = f.messages
+    .filter((message) => message.method === 'session/set_config_option')
+    .map((message) => [message.params.configId, message.params.value])
+  assert.deepEqual(configs, [['mode', 'auto'], ['model', 'kimi-code/k3'], ['thinking', 'high']])
+})
+
+test('Kimi own-config with cli-config model keeps the CLI default and unknown efforts are skipped', async () => {
+  const f = fixture({ ownCatalog: true, provider: 'kimi-code', model: 'cli-config' })
+  f.request.reasoningEffort = 'xhigh'
+  const run = await startKimiAcpRun(f.deps, f.request)
+  const eventPromise = collect(run.stream)
+  await f.terminalGate
+  f.spawns[0].handle.complete()
+  const [, result] = await Promise.all([eventPromise, run.result])
+  await run.dispose()
+
+  assert.equal(result.stopReason, 'completed')
+  const configs = f.messages
+    .filter((message) => message.method === 'session/set_config_option')
+    .map((message) => [message.params.configId, message.params.value])
+  assert.deepEqual(configs, [['mode', 'auto']])
 })

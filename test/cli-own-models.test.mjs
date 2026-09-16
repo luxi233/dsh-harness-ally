@@ -148,6 +148,74 @@ test('codex own-config lists the account catalog from model/list with reasoning 
   assert.equal(resolved.reasoning.defaultEffort, 'high')
 })
 
+// 模拟 kimi acp:JSON-RPC initialize → session/new(configOptions 携带
+// model select + thought_level 档位)。fail 时 session/new 返回认证错误。
+function kimiCatalogDeps({ fail } = {}) {
+  const writes = []
+  const stdout = new PassThrough()
+  const configOptions = [
+    { type: 'select', id: 'mode', currentValue: 'default', options: [{ value: 'auto', name: 'Auto' }] },
+    { type: 'select', id: 'model', category: 'model', currentValue: 'kimi-code/kimi-for-coding', options: [
+      { value: 'kimi-code/kimi-for-coding', name: 'K2.8 Preview' },
+      { value: 'kimi-code/k3', name: 'K3' },
+    ] },
+    { type: 'select', id: 'thinking', category: 'thought_level', currentValue: 'max', options: [
+      { value: 'low', name: 'Thinking Low' },
+      { value: 'high', name: 'Thinking High' },
+      { value: 'max', name: 'Thinking Max' },
+    ] },
+  ]
+  const child = {
+    stdin: {
+      write(text) {
+        writes.push(text)
+        const message = JSON.parse(text.trim())
+        queueMicrotask(() => {
+          if (message.method === 'initialize') {
+            stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: 1 } })}\n`)
+          } else if (message.method === 'session/new') {
+            if (fail) stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32000, message: 'Authentication required' } })}\n`)
+            else stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { sessionId: 's1', configOptions } })}\n`)
+          }
+        })
+        return true
+      },
+    },
+    stdout,
+    terminate() {},
+    done: new Promise(() => {}),
+  }
+  return {
+    writes,
+    deps: {
+      subprocess: { async resolveExecutable() { return '/bin/kimi' }, spawn() { return child } },
+    },
+  }
+}
+
+test('kimi own-config lists the account catalog from ACP configOptions with thinking efforts', async () => {
+  const { deps, writes } = kimiCatalogDeps()
+  const kimi = ownConfigAdapters(deps).find((adapter) => adapter.providerId === 'kimi-code')
+
+  const models = await kimi.listModels('kimi-code')
+  assert.deepEqual(models.map((model) => model.id), ['kimi-code/kimi-for-coding', 'kimi-code/k3'])
+  assert.equal(models[0].name, 'K2.8 Preview')
+  assert.ok(writes.some((line) => line.includes('"initialize"')))
+  assert.ok(writes.some((line) => line.includes('"session/new"')))
+
+  const resolved = await kimi.resolveModel('kimi-code', 'kimi-code/k3')
+  assert.equal(resolved.name, 'K3')
+  assert.deepEqual(resolved.reasoning.efforts.map((effort) => effort.id), ['low', 'high', 'max'])
+  assert.equal(resolved.reasoning.defaultEffort, 'max')
+})
+
+test('kimi own-config falls back to the cli-config placeholder when unauthenticated', async () => {
+  const { deps } = kimiCatalogDeps({ fail: true })
+  const kimi = ownConfigAdapters(deps).find((adapter) => adapter.providerId === 'kimi-code')
+  const models = await kimi.listModels('kimi-code')
+  assert.deepEqual(models.map((model) => model.id), ['cli-config'])
+})
+
 test('codex own-config falls back to the configured model when model/list fails', async () => {
   const dir = tempHome()
   writeFileSync(join(dir, 'config.toml'), 'model = "gpt-5.5"\n')
