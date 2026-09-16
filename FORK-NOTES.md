@@ -92,6 +92,8 @@ nothing for you — it only activates when `req.headers.host` is `127.0.0.1` / `
 | `lib/devin-acp.js` (fork.13) | `request.model` + `request.reasoningEffort` translate to the `<model>-<effort>` slug for `devin acp --model` (skipped when the model already carries a tier suffix) |
 | `lib/index.js` (fork.13) | `GET /ally/model-diag?provider&model` — live in-process `listModels`/`resolveModelInfo` probe for catalog debugging |
 | `package.json` (fork.13) | Bumped the fork version to `0.12.1-fork.13` |
+| `lib/devin-models.js` / `lib/devin-acp.js` (fork.14) | Family grouping normalizes vendor slug spellings (`.`, `_`, `-` equivalent) — base entries like `gpt-5.6-luna`/`swe-1.7` now pick up their hyphenated tier variants (`gpt-5-6-luna-high`, `swe-1-7-medium`); dispatch resolves the real variant slug from the account catalog instead of naive concatenation |
+| `package.json` (fork.14) | Bumped the fork version to `0.12.1-fork.14` |
 | `test/cli-manager.test.mjs`, `test/runtime.test.mjs` (fork.11) | Devin install test updated for the download-then-`-File` flow (asserts the downloaded URL and that argv ends with the script path); mismatch test rewritten to assert the auto-switch and dispatch under the bound Harness, plus a failure-path case when `select()` can't run |
 | `package.json` (fork.11) | Bumped the fork version to `0.12.1-fork.11` |
 
