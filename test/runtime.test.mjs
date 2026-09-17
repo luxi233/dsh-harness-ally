@@ -501,7 +501,7 @@ test('watermark survives an image turn so the next request can resume natively',
   assert.equal(starts[1].request.conversation.resumeFrom(watermark), 'USER\nand now?')
 })
 
-test('external Harness emits one standard usage sample even when the provider omits metrics', async () => {
+test('external Harness estimates usage from the dispatched prompt when the provider omits metrics', async () => {
   const { runtime, session } = fixture({ harness: 'codex' })
   session.append('turn/start', { turn: 1 })
   session.append('step/start', { turn: 1, step: 1 })
@@ -512,9 +512,14 @@ test('external Harness emits one standard usage sample even when the provider om
     messages: [{ role: 'user', content: [{ type: 'text', text: 'work' }] }],
   }, fallback().next))
 
-  assert.deepEqual(chunks.filter((chunk) => chunk.type === 'usage'), [{
-    type: 'usage', usage: { inputTokens: 0, outputTokens: 0 },
-  }])
+  const usageChunks = chunks.filter((chunk) => chunk.type === 'usage')
+  assert.equal(usageChunks.length, 1)
+  const { usage } = usageChunks[0]
+  // 无回报时按 prompts.full 估算 inputTokens,分子供 contextPressure
+  // 投影渲染圆环;contextInput/contextOutput 同值标注。
+  assert.ok(usage.inputTokens > 0)
+  assert.equal(usage.contextInputTokens, usage.inputTokens)
+  assert.equal(usage.contextOutputTokens, usage.outputTokens)
   assert.equal(chunks.at(-1).type, 'finish')
 })
 
