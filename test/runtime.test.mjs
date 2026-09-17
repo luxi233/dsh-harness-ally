@@ -3,12 +3,13 @@ import test from 'node:test'
 
 import { createAllianceRuntime, createConversationView } from '../lib/runtime.js'
 
-function fixture({ preset = 'harness-ally', status = 'idle', harness = 'dsh', result, stream, availabilityGate, dispatchGate, startError, onRecordDispatch } = {}) {
+function fixture({ preset = 'harness-ally', status = 'idle', harness = 'dsh', result, stream, availabilityGate, dispatchGate, startError, onRecordDispatch, llm } = {}) {
   const session = {
     id: 'session-1',
     header: { cwd: '/workspace', agentPreset: preset },
     events: [],
     append(type, data) { this.events.push({ seq: this.events.length + 1, type, data }) },
+    snapshotEvents() { return this.events.slice() },
   }
   const agent = {
     id: session.id,
@@ -69,6 +70,7 @@ function fixture({ preset = 'harness-ally', status = 'idle', harness = 'dsh', re
     gateway,
     state,
     isAgentLoopRequest: (options) => options.agentLoop === true,
+    llm,
   })
   return { runtime, session, agent, starts, createdRuns, persists, recordedDispatches, gateway }
 }
@@ -1177,4 +1179,74 @@ test('compaction calls bypass external dispatch outside the alliance preset', as
 
   assert.equal(pass.called, 1)
   assert.equal(starts.length, 0)
+})
+
+test('compaction summarizes with a previous larger-window model across Harnesses', async () => {
+  const { runtime, session, starts } = fixture({ harness: 'devin' })
+  session.append('request/context', { provider: 'codex', model: 'gpt-5.6-sol', contextWindow: 1000000 })
+  session.append('request/context', { provider: 'devin', model: 'swe-2', contextWindow: 262000 })
+
+  await collect(runtime.route({
+    sessionId: session.id, purpose: 'compaction', provider: 'devin', model: 'swe-2',
+    messages: [{ role: 'user', content: [{ type: 'text', text: 'x'.repeat(1_100_000) }], source: { kind: 'user' } }],
+  }, fallback().next))
+
+  assert.equal(starts.length, 1)
+  assert.equal(starts[0].selected, 'codex')
+  assert.equal(starts[0].request.provider, 'codex')
+  assert.equal(starts[0].request.model, 'gpt-5.6-sol')
+})
+
+test('compaction reuses the Harness that previously ran an unbound provider model', async () => {
+  const { runtime, session, starts, recordedDispatches } = fixture({ harness: 'devin' })
+  recordedDispatches.push({ turn: 1, harness: 'devin', provider: 'openai', model: 'gpt-5.6-luna', started: true })
+  session.append('request/context', { provider: 'openai', model: 'gpt-5.6-luna', contextWindow: 1000000 })
+  session.append('request/context', { provider: 'devin', model: 'swe-2', contextWindow: 262000 })
+
+  await collect(runtime.route({
+    sessionId: session.id, purpose: 'compaction', provider: 'devin', model: 'swe-2',
+    messages: [{ role: 'user', content: [{ type: 'text', text: 'x'.repeat(1_100_000) }], source: { kind: 'user' } }],
+  }, fallback().next))
+
+  assert.equal(starts.length, 1)
+  assert.equal(starts[0].selected, 'devin')
+  assert.equal(starts[0].request.provider, 'openai')
+  assert.equal(starts[0].request.model, 'gpt-5.6-luna')
+})
+
+test('compaction hands a never-dispatched native provider model back to DSH', async () => {
+  const { runtime, session, starts } = fixture({ harness: 'devin' })
+  session.append('request/context', { provider: 'openai', model: 'gpt-5.6-luna', contextWindow: 1000000 })
+  session.append('request/context', { provider: 'devin', model: 'swe-2', contextWindow: 262000 })
+  const options = {
+    sessionId: session.id, purpose: 'compaction', provider: 'devin', model: 'swe-2',
+    reasoningEffort: 'high',
+    messages: [{ role: 'user', content: [{ type: 'text', text: 'x'.repeat(1_100_000) }], source: { kind: 'user' } }],
+  }
+  let seen
+  const next = () => {
+    seen = { provider: options.provider, model: options.model, reasoningEffort: options.reasoningEffort }
+    return (async function* () { yield { type: 'finish', reason: { kind: 'stop' } } })()
+  }
+
+  await collect(runtime.route(options, next))
+
+  assert.equal(starts.length, 0)
+  assert.equal(seen.provider, 'openai')
+  assert.equal(seen.model, 'gpt-5.6-luna')
+  assert.equal(seen.reasoningEffort, undefined)
+})
+
+test('compaction picks the largest known window when nothing fits the span', async () => {
+  const { runtime, session, starts } = fixture({ harness: 'devin' })
+  session.append('request/context', { provider: 'codex', model: 'gpt-5.6-sol', contextWindow: 1000000 })
+  session.append('request/context', { provider: 'devin', model: 'swe-2', contextWindow: 262000 })
+
+  await collect(runtime.route({
+    sessionId: session.id, purpose: 'compaction', provider: 'devin', model: 'swe-2',
+    messages: [{ role: 'user', content: [{ type: 'text', text: 'x'.repeat(4_400_000) }], source: { kind: 'user' } }],
+  }, fallback().next))
+
+  assert.equal(starts.length, 1)
+  assert.equal(starts[0].selected, 'codex')
 })
