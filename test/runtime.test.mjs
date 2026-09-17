@@ -1109,3 +1109,72 @@ test('own-config provider dispatches under its matching Harness', async () => {
   assert.equal(starts.length, 1)
   assert.equal(starts[0].request.provider, 'kimi-code')
 })
+
+test('compaction calls dispatch to the provider-bound Harness as a detached session', async () => {
+  const { runtime, session, starts, recordedDispatches } = fixture({
+    harness: 'devin',
+    result: { output: [{ type: 'text', text: 'SUMMARY' }], stopReason: 'completed' },
+  })
+
+  const chunks = await collect(runtime.route({
+    sessionId: session.id, purpose: 'compaction', provider: 'devin', model: 'swe-2',
+    messages: [
+      { role: 'user', content: [{ type: 'text', text: 'hello' }], source: { kind: 'user' } },
+      { role: 'assistant', content: [{ type: 'text', text: 'hi' }], source: { kind: 'model' } },
+      { role: 'user', content: [{ type: 'text', text: 'summarize' }], source: { kind: 'plugin' } },
+    ],
+  }, fallback().next))
+
+  assert.equal(starts.length, 1)
+  const request = starts[0].request
+  assert.equal(starts[0].selected, 'devin')
+  assert.match(request.prompt[0].text, /hello/)
+  assert.match(request.prompt[0].text, /summarize/)
+  assert.equal(request.incrementalPrompt, undefined)
+  assert.equal(request.promptSignature, undefined)
+  assert.equal(request.turn, undefined)
+  assert.equal(recordedDispatches.length, 0)
+  const finish = chunks.at(-1)
+  assert.equal(finish.type, 'finish')
+  assert.equal(finish.reason.kind, 'stop')
+  const textEnd = chunks.find((chunk) => chunk.type === 'block-end' && chunk.block?.type === 'text')
+  assert.equal(textEnd.block.text, 'SUMMARY')
+})
+
+test('compaction calls follow the provider binding over the selected Harness', async () => {
+  const { runtime, session, starts } = fixture({ harness: 'devin' })
+
+  await collect(runtime.route({
+    sessionId: session.id, purpose: 'compaction', provider: 'codex', model: 'gpt-5.6-sol',
+    messages: [{ role: 'user', content: [{ type: 'text', text: 'hello' }], source: { kind: 'user' } }],
+  }, fallback().next))
+
+  assert.equal(starts.length, 1)
+  assert.equal(starts[0].selected, 'codex')
+})
+
+test('compaction calls bypass external dispatch on the DSH Harness', async () => {
+  const { runtime, session, starts } = fixture({ harness: 'dsh' })
+  const pass = fallback()
+
+  await collect(runtime.route({
+    sessionId: session.id, purpose: 'compaction', provider: 'openai', model: 'gpt-5.6-luna',
+    messages: [{ role: 'user', content: [{ type: 'text', text: 'hello' }], source: { kind: 'user' } }],
+  }, pass.next))
+
+  assert.equal(pass.called, 1)
+  assert.equal(starts.length, 0)
+})
+
+test('compaction calls bypass external dispatch outside the alliance preset', async () => {
+  const { runtime, session, starts } = fixture({ preset: 'standard', harness: 'devin' })
+  const pass = fallback()
+
+  await collect(runtime.route({
+    sessionId: session.id, purpose: 'compaction', provider: 'devin', model: 'swe-2',
+    messages: [{ role: 'user', content: [{ type: 'text', text: 'hello' }], source: { kind: 'user' } }],
+  }, pass.next))
+
+  assert.equal(pass.called, 1)
+  assert.equal(starts.length, 0)
+})
