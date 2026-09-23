@@ -29,6 +29,7 @@
     "lib/image-input.js",
     "lib/harness.js",
     "lib/runtime.js",
+    "lib/projection-cache-shim.js",
     "lib/work-ledger.js",
     "lib/client.js",
     "cordis.patch.yml"
