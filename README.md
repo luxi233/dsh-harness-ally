@@ -89,20 +89,28 @@ $env:KIMI_CODE_HOME = $kimiHome
 ## 安装
 
 ```bash
-# 1. 克隆本 fork 到固定 preset id（Host 的隔离规则依赖 harness-ally）
-git clone https://github.com/luxi233/dsh-harness-ally.git ~/.dsh/.agent-presets/harness-ally
-# Windows PowerShell:
-# git clone https://github.com/luxi233/dsh-harness-ally.git "$env:USERPROFILE\.dsh\.agent-presets\harness-ally"
+# 1. 克隆本仓库到任意位置（DSH ≥ 0.2.0 不再扫描 .agent-presets 目录，
+#    preset 经 bundle patch 声明，安装器会把仓库 link 到 Profile）
+git clone https://github.com/luxi233/dsh-harness-ally.git
+cd dsh-harness-ally
 
-# 2. 把同一仓库以 link 方式注册到 Web Profile
-node ~/.dsh/.agent-presets/harness-ally/setup/install.mjs
+# 2. 注册到 DSH Profile：默认自动选择 desktop（桌面版），也可用
+#    --profile web 指回 Web Profile
+node setup/install.mjs
+# 显式指定：node setup/install.mjs --profile desktop
 ```
 
 > 想用原版(无 Windows/远程兼容补丁)?把 URL 换成 `https://github.com/BaronCyrus/dsh-harness-ally.git` 即可。
 
-如果设置了 `DSH_HOME`，将上面的 `~/.dsh` 替换为对应目录。
+如果设置了 `DSH_HOME`，安装器会写入 `$DSH_HOME/profiles/<name>`；桌面版对应 `profiles/desktop`。
 
-安装后重启现有 `dsh web` 进程，然后新建「Harness联盟模式」会话。不要另起替代 Web server；已经打开的 GUI 只会连接原来的 DSH 进程。
+pnpm 解析顺序：`--pnpm <entry>` / `DSH_PNPM_ENTRY` 指定 `pnpm.cjs`/`pnpm.mjs` 入口 → npm 全局 pnpm → 桌面版随包 `resources/runtime/pnpm` → `PATH`。例如桌面版自带 pnpm：
+
+```powershell
+node setup/install.mjs --profile desktop --pnpm "D:\DeepSeekHarness\resources\runtime\pnpm\bin\pnpm.mjs"
+```
+
+安装后重启 DSH 桌面版应用（或现有 `dsh web` 进程），然后新建「Harness联盟模式」会话。不要另起替代 Web server；已经打开的 GUI 只会连接原来的 DSH 进程。
 
 ## 使用
 
@@ -174,8 +182,9 @@ node ~/.dsh/.agent-presets/harness-ally/setup/install.mjs
 
 ```text
 ├── preset.yml / agent.cordis.yml  # preset 元数据与 agent-plane composition
+├── preset.patch.yml               # 生成产物：DSH ≥0.2.0 的 preset 声明（勿手改）
 ├── ally-prompt.mjs                # 联盟会话提示 section
-├── cordis.patch.yml               # Web Profile 的 Host bundle patch
+├── cordis.patch.yml               # Profile 的 Host bundle patch
 ├── lib/
 │   ├── index.js                   # Host wiring、transport 与 teardown
 │   ├── runtime.js                 # Agent-loop router、全量/增量 prompt、实时过程与最终校准
@@ -191,13 +200,14 @@ node ~/.dsh/.agent-presets/harness-ally/setup/install.mjs
 │   ├── state.js                   # Session 日志外的选择、badge 与原生 lane v3 水位线状态
 │   └── client.js                  # Harness selector、安装按钮与徽标
 ├── test/                          # Node 回归测试
-├── setup/install.mjs              # 跨平台、幂等的 Web Profile link 安装器
+├── setup/install.mjs              # 跨平台、幂等的 Profile link 安装器（desktop/web）
+├── setup/gen-preset-patch.mjs     # preset.patch.yml 生成器（preset.yml + agent.cordis.yml）
 └── docs/DEVELOPMENT.md            # 开发、安全边界与版本约定
 ```
 
 ## 开发
 
-仓库通过 `link:` 接入 Web Profile，因此同事可以直接在 clone 内迭代：
+仓库通过 `link:` 接入目标 Profile（desktop 或 web），因此同事可以直接在 clone 内迭代：
 
 ```bash
 npm test

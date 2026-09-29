@@ -9,8 +9,13 @@ const clientSource = fs.readFileSync(clientPath, 'utf8')
 
 function loadClient(agentPreset, { selectorOpen = false, projectionValues = false } = {}) {
   const sessionId = 'session-1'
-  const session = projectionValues ? { projectionValues: { agentPreset } } : { agentPreset }
-  const listState = { current: sessionId, byId: { [sessionId]: session } }
+  // DSH 0.2.0 sessions.list 快照: {ids, byId, phase, projectionsBySession}；
+  // 每条摘要带 retainedBy（主视图可见性 = retainedBy.mainView > 0）。
+  const session = {
+    retainedBy: { mainView: 1 },
+    ...(projectionValues ? { projectionValues: { agentPreset } } : { agentPreset }),
+  }
+  const listState = { ids: [sessionId], byId: { [sessionId]: session }, phase: 'ready', projectionsBySession: {} }
   const registrations = []
   const definitions = []
   const React = {
@@ -96,7 +101,7 @@ test('Harness selector reads the current projectionValues agent preset field', (
 
 test('new-session screen never inherits Harness visibility from a stale prior alliance session', () => {
   const fixture = loadClient('harness-ally')
-  fixture.listState.current = undefined
+  fixture.listState.byId[fixture.sessionId].retainedBy = {}
   assert.equal(fixture.inputRight.component(selectorProps(fixture)), null)
 })
 
@@ -193,6 +198,6 @@ test('badges use an additive assistant action without claiming the exclusive tur
   assert.equal(clientSource.includes('ally/dispatch'), false)
   assert.equal(fixture.registrations.some((entry) => entry.config.name === 'conversation.chat.turnTail'), false)
   assert.equal(badge.config.name, 'conversation.chat.assistant-actions')
-  assert.equal(clientSource.includes("node.kind === 'assistant-step'"), true)
-  assert.equal(clientSource.includes('node.data?.finalNode?.messageId'), true)
+  assert.equal(clientSource.includes("node.kind === 'turn-tail'"), true)
+  assert.equal(clientSource.includes('closing?.finalNode?.messageId'), true)
 })

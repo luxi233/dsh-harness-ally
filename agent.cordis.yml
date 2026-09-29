@@ -33,10 +33,11 @@
   config:
     maxBytes: 65536
 
-# 联盟说明 section：preset 目录内的本地插件（相对名按 composition 目录解析），
-# 只注册 prompt section，不发布 Service。
+# 联盟说明 section：包内的本地插件（经本包 exports 子路径解析 —— preset
+# 挂载点的 baseUrl 是 profile 组合目录而非本包目录，裸包名 + 子路径才能
+# 穿过 profile 模块路由），只注册 prompt section，不发布 Service。
 - id: ally-prompt
-  name: './ally-prompt.mjs'
+  name: 'dsh-ally/ally-prompt.mjs'
 
 # ── shell ───────────────────────────────────────────────────────────────────
 
@@ -94,12 +95,15 @@
 
 # ── goals ───────────────────────────────────────────────────────────────────
 
-# Only the model-facing tool. The goal SERVICE, its session driver, and the
-# `/goal` command stay on the host plane: the Gateway serves the goal domain as
+# Only the model-facing tool and its `/goal` command. The goal SERVICE and its
+# session driver stay on the host plane: the Gateway serves the goal domain as
 # Remote endpoints whose receiver comes from a generated descriptor, so it
 # resolves `goals` on the host and an entry-local realm here would hide it. The
 # registry is keyed by session anyway, so one host instance serves every
 # session. What a preset chooses is whether its agent can call the goal tool.
+- id: command-goal
+  name: '@deepseek-ai/dsh-command-goal'
+
 - id: tool-goal
   name: '@deepseek-ai/dsh-tool-goal'
 
@@ -194,6 +198,7 @@
       config:
         provider: spawn
         toolName: subagent
+        modelSelectionSettings: true
         backgroundMode: continuable
 
     - id: tool-subagent-fork
@@ -237,8 +242,8 @@
         backgroundMode: one-shot
         maxDepth: provider-managed
 
-    - id: workflow-worker-thread
-      name: '@deepseek-ai/dsh-workflow-worker-thread'
+    - id: workflow-ptc
+      name: '@deepseek-ai/dsh-workflow-ptc'
       config:
         provider: spawn
 
@@ -268,3 +273,10 @@
   config:
     fetch: false
     searchTimeoutMs: 60000
+
+- id: present
+  name: '@deepseek-ai/dsh-tool-present'
+
+- id: tool-plugin-manager
+  name: '@deepseek-ai/dsh-plugin-manager/tools'
+  disabled: true

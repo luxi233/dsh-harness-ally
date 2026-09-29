@@ -24,3 +24,13 @@ test('selection mutation rejects DNS-rebinding and mismatched origins', () => {
   assert.equal(trustedMutation(request('127.0.0.1:3080', 'http://127.0.0.1:9999')), true)
   assert.equal(trustedMutation({ headers: { ...request('127.0.0.1:3080').headers, 'sec-fetch-site': 'cross-site' } }), false)
 })
+
+test('desktop shell forwards carry no Origin but stay trusted over loopback', () => {
+  // dsh-app:// 协议代理会剥掉 origin/sec-fetch-site/host 后再转发；
+  // 转发后的请求带 loopback Host、无 Origin。
+  const forwarded = { headers: { host: '127.0.0.1:19387', 'content-type': 'application/json' } }
+  assert.equal(trustedMutation(forwarded), true)
+  // 非回环入口仍然要求 Origin
+  const remote = { headers: { host: '113.31.118.243:3002', 'content-type': 'application/json' } }
+  assert.equal(trustedMutation(remote), false)
+})

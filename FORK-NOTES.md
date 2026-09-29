@@ -24,7 +24,9 @@ plugin code. They can be rebased against future upstream releases with minimal c
 
 ## What this fork does NOT change
 
-- The PRESET_ID stays `harness-ally` (install path `~/.dsh/.agent-presets/harness-ally/`)
+- The PRESET_ID stays `harness-ally` (since DSH 0.2.0 the preset is declared via the
+  bundle's `preset.patch.yml` insert row; the legacy `.agent-presets/` scan is gone,
+  so the clone location is free-form — `setup/install.mjs` links wherever it lives)
 - The package name stays `dsh-ally` (so `setup/install.mjs` works unchanged)
 - The cordis host bundle id stays `ally` (no collision with upstream)
 - The model routing, work ledger, native session parking, and reasoning codec are untouched
@@ -105,23 +107,34 @@ nothing for you — it only activates when `req.headers.host` is `127.0.0.1` / `
 | `lib/index.js`, `package.json` (fork.16) | Shim wired into `apply`; `files` lists `projection-cache-shim.js`; version bumped to `0.12.1-fork.16` |
 | `lib/devin-acp.js` (fork.17) | Strips `WINDSURF_EXT_HOST_PID` from the spawned devin env — devin acp's host watchdog monitors that variable (the IDE extension-host pid), not the OS parent. When DSH is launched from a Devin/Windsurf IDE terminal it inherits the variable, and once the IDE's extension host dies every `devin acp` run self-terminates ~2s into the handshake with a clean `exit 0` (reported as "提前退出 exit 0"). Passing the key as `undefined` drops it on both the Windows job-runner path and the direct-spawn fallback; codex/kimi have no such watchdog and claude's orphan check watches the real ppid, so no other harness needs this |
 | `package.json` (fork.17) | Bumped the fork version to `0.12.1-fork.17` |
+| `preset.patch.yml`, `setup/gen-preset-patch.mjs`, `agent.cordis.yml`, `package.json`, `setup/install.mjs` (fork.18) | DSH 0.2.0 / desktop adaptation: presets are no longer discovered by scanning `$DSH_HOME/.agent-presets/<id>` — the preset is now declared as an `@deepseek-ai/dsh-agent-preset` insert row inside the bundle patch (`dsh.bundle.patch` is a list: `cordis.patch.yml` + generated `preset.patch.yml`, whose `config.plugins` inlines `agent.cordis.yml` verbatim). Composition updated to the 0.2.0 toolset (`dsh-workflow-ptc` replaces `dsh-workflow-worker-thread`, `dsh-command-goal` and `dsh-tool-present` added, `modelSelectionSettings: true` on the spawn subagent tool, `dsh-plugin-manager/tools` disabled row). `dsh.client.external: ["react"]` declared (seed module supplied by the shell). Installer targets `profiles/desktop` by default (`--profile` override), no longer requires the fixed clone path, and resolves pnpm via `--pnpm`/`DSH_PNPM_ENTRY` → npm-global → bundled desktop runtime → `PATH` |
+| `agent.cordis.yml`, `package.json` (fork.18) | `ally-prompt` row now addresses the module as `dsh-ally/ally-prompt.mjs` with a matching `exports` subpath: inside an inlined `config.plugins` list the mount baseUrl is the profile's `cordis.yml` directory, not the package directory, so the old `./ally-prompt.mjs` resolved to a nonexistent file and the whole preset mounted as `broken` (hidden from the picker) |
+| `lib/index.js` (fork.18) | `loadAgentLoopGuard` gains a bare-specifier fallback routed through the profile module interception when `argv[1]` resolution fails; `/ally/model-diag` now includes the `agentPresets.list()` roster so preset mount failures (`broken` diagnostics) are inspectable without a client |
+| `lib/client.js`, `test/client-visibility.test.cjs` (fork.19) | DSH 0.2.0 client-store model: `sessions.list` snapshots no longer carry `current` — the visible-session gate is `summary.retainedBy.mainView > 0` (same check the official preset seat uses); the per-session snapshot dropped `chat`/`turnEnds`, so the selector refresh depends on `running` only and `AllyTurnBadge` resolves its turn through the ambient `useChat` store's `turn-tail` nodes (`data.closing.finalNode.messageId`) |
+| `lib/index.js`, `test/http-trust.test.mjs` (fork.19) | `trustedMutation` no longer requires an Origin header when the Host is loopback: the desktop shell's `dsh-app://` protocol proxy strips `origin`/`sec-fetch-site`/`host` before forwarding to the Host, so `/ally/select` and `/ally/cli-install` were 403'd ("拒绝非同源请求") even though reads passed. Remote (whitelisted) entries still require Origin |
+| `test/install.test.mjs` (fork.18) | Covers desktop-first profile detection, `--profile` override, regenerated `preset.patch.yml` content, and cross-drive `link:` targets |
+| `lib/cli-manager.js`, `lib/harness.js`, `lib/client.js`, `test/cli-manager.test.mjs` (fork.19) | Non-blocking install probing: `resolve()` awaited `installs.get(harness)`, so a hung Devin `setup.ps1` download froze `/ally/snapshot` → UI stuck at "检查中" + `Failed to fetch`. Added `DOWNLOAD_TIMEOUT_MS` (120 s) on the script fetch and a 10-min `INSTALL_TIMEOUT_MS` watchdog (`unref`'d) around the whole install; `harness.available()` now uses the new `probe()` which reports `{installing:true}` without awaiting, while `resolve()` still awaits for the real dispatch path. The client polls `cli-status` every 3 s while the popover is open or an install is running, so "安装中" flips back to a real state without a reload. Script installs no longer wait on `child.done` alone: the official installers end with an interactive `devin setup` step that never returns with stdin ignored (the Windows Job runner also waits for the whole managed range to drain), so `child.done` is raced against a "payload written" watch — `distribution` marker (written after the entrypoint copy) plus the entry binary as fallback — followed by a 15 s settle window and a `terminate()` of the leftover installer process tree |
+| `package.json` (fork.18) | Bumped the fork version to `0.12.1-fork.18`; `files` lists `ally-prompt.mjs`/`preset.patch.yml`/`agent.cordis.yml`/`preset.yml`/`setup/*` so a packed tarball keeps working |
 
 ## Install
 
-Identical to upstream:
+DSH ≥ 0.2.0 (including the desktop app, which owns `profiles/desktop`):
 
 ```powershell
-git clone https://github.com/luxi233/dsh-harness-ally.git "$env:USERPROFILE\.dsh\.agent-presets\harness-ally"
-cd "$env:USERPROFILE\.dsh\.agent-presets\harness-ally"
-node setup/install.mjs
+git clone https://github.com/luxi233/dsh-harness-ally.git
+cd dsh-harness-ally
+node setup/install.mjs                       # defaults to the desktop profile
+node setup/install.mjs --profile web         # or the classic web profile
+# pnpm entry override if pnpm is not on PATH:
+node setup/install.mjs --pnpm "D:\DeepSeekHarness\resources\runtime\pnpm\bin\pnpm.mjs"
 ```
 
-Restart `dsh web` after install.
+Restart the DSH desktop app (or `dsh web`) after install.
 
 ## Syncing with upstream
 
 ```powershell
-cd "$env:USERPROFILE\.dsh\.agent-presets\harness-ally"
+cd <clone>/dsh-harness-ally
 git fetch upstream
 git rebase upstream/main
 # resolve any conflicts, then:
