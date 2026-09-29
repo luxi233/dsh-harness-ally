@@ -5,12 +5,13 @@ import test from 'node:test'
 
 import { createCliManager } from '../lib/cli-manager.js'
 
-function fixture({ globals = {}, installOk = true } = {}) {
+function fixture({ globals = {}, installOk = true, hang = false, binaryAppears = false } = {}) {
   const managedRoot = '/managed/dsh-ally'
   const managed = new Set()
   const spawns = []
   const resolves = []
   const downloads = []
+  const terminated = []
   const binName = (name) => process.platform === 'win32' ? `${name}.cmd` : name
   const managedPath = (harness, name) => join(managedRoot, harness, 'node_modules', '.bin', binName(name))
   const devinUserBin = process.platform === 'win32'
@@ -29,6 +30,23 @@ function fixture({ globals = {}, installOk = true } = {}) {
       spawns.push(spec)
       let settle
       const done = new Promise((resolve) => { settle = resolve })
+      if (hang) {
+        // 模拟安装器常驻(如官方脚本结尾的交互式 `devin setup`):
+        // 载荷已写盘但 done 永不 settle;terminate 记入 terminated。
+        if (binaryAppears) queueMicrotask(() => {
+          if (spec.argv.some((arg) => typeof arg === 'string' && arg.includes('dsh-ally-devin-setup'))) managed.add(devinUserBin)
+        })
+        return {
+          pid: 123,
+          done,
+          collected: {
+            stdout: { readFrom: () => ({ text: '', nextOffset: 0, lossy: false }) },
+            stderr: { readFrom: () => ({ text: '', nextOffset: 0, lossy: false }) },
+          },
+          terminate() { terminated.push(spec.argv[0]) },
+          async waitForExit() { await done; return true },
+        }
+      }
       queueMicrotask(() => {
         if (installOk) {
           const packageName = spec.argv.at(-1)
@@ -57,8 +75,10 @@ function fixture({ globals = {}, installOk = true } = {}) {
     mkdir: async () => {},
     rm: async () => {},
     download: async (url, dest) => { downloads.push([url, dest]) },
+    scriptPollMs: 5,
+    scriptSettleMs: 20,
   })
-  return { manager, managedRoot, managedPath, managed, spawns, resolves, downloads, devinUserBin }
+  return { manager, managedRoot, managedPath, managed, spawns, resolves, downloads, devinUserBin, terminated }
 }
 
 test('CLI status detects global first, then DSH-managed, then missing', async () => {
@@ -140,6 +160,31 @@ test('install is idempotent for global CLIs and coalesces concurrent managed ins
   assert.deepEqual(first, { available: true, source: 'managed', installing: false })
   assert.deepEqual(second, first)
   assert.equal(managed.spawns.length, 1)
+})
+
+test('probe stays non-blocking while an install is in flight', async () => {
+  const f = fixture({ hang: true })
+  const pending = f.manager.install('codex')
+  pending.then(() => {}, () => {})
+
+  // status()/inspect 标记 installing 而不等待;
+  assert.equal((await f.manager.status()).codex.installing, true)
+  // probe 对进行中安装立即返回 false,不挂起轮询请求;
+  // resolve() 则继续等待安装结果(派发路径语义不变)。
+  assert.equal(await f.manager.probe('codex'), false)
+})
+
+test('script install completes when the installer lingers in an interactive tail step', async () => {
+  // 官方 setup.ps1/install.sh 结尾会跑 `devin setup`(交互式,stdin 已 ignore,
+  // 永不返回)。安装本体在此之前已写完,所以二进制/完成标记出现即视为成功,
+  // 残余进程由 terminate 收尾——不能等 done,否则状态永远停在"安装中"。
+  const f = fixture({ hang: true, binaryAppears: true })
+
+  const installed = await f.manager.install('devin')
+
+  assert.deepEqual(installed, { available: true, source: 'global', installing: false })
+  assert.equal(f.terminated.length >= 1, true)
+  assert.equal(await f.manager.resolve('devin'), f.devinUserBin)
 })
 
 test('failed or unsupported installs fail without exposing npm output', async () => {
